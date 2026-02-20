@@ -1,0 +1,15 @@
+aiogram
+grpcio
+grpcio-tools
+black
+sqlalchemy[asyncio]
+asyncpg
+alembic
+yookassa
+redis
+orjson
+pydantic
+psycopg2-binary
+pyyaml
+cryptography
+qrcode[pil]

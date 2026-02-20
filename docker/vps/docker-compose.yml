@@ -1,0 +1,19 @@
+services:
+  monkey-island-vps-bot:
+    restart: unless-stopped
+    network_mode: host
+    hostname: monkeyisland.life
+    image: monkey-island-vps-bot:v0.1
+    env_file:
+      - .env
+    privileged: true
+    volumes:
+      - log:/app/log
+      - locales:/app/locales
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+volumes:
+  log:
+  locales:
