@@ -7,6 +7,7 @@ from yookassa import Configuration
 from common.models.db import User
 from common.models.tariff import Tariff
 from common.models.tariff import TrialPromotionTariff
+from utils.public_resources import TELEGRAM_BOT_URL
 
 
 def create_payment_sync(
@@ -21,7 +22,7 @@ def create_payment_sync(
             "amount": {"value": tariff.price, "currency": "RUB"},
             "confirmation": {
                 "type": "redirect",
-                "return_url": "https://t.me/monkeyislandvpnbot",
+                "return_url": TELEGRAM_BOT_URL,
             },
             "metadata": {
                 "username": username,

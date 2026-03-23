@@ -1,1 +1,1 @@
-# monkeyislandvpnbot
+# shredder-vpn-bot

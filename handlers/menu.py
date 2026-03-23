@@ -29,6 +29,7 @@ from .misc import traffic_source_from_args
 from .misc import referrer_username_from_args
 from .misc import data_limit_reset_strategy_to_str
 from utils.config import Config
+from utils.public_resources import TELEGRAM_BOT_URL
 from utils.encrypt_happ_url import encrypt_happ_url
 from utils.redis_message_broker import RedisMessageBroker
 from utils.rwms_helpers import create_user
@@ -461,7 +462,7 @@ async def __invite_friend_button_clicked(
                 session, db_user.username
             )
 
-        referral_url = f"https://t.me/monkeyislandvpnbot?start=a{db_user.username}"
+        referral_url = f"{TELEGRAM_BOT_URL}?start=a{db_user.username}"
 
         img = qrcode.make(referral_url)
 

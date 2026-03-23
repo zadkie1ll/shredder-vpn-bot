@@ -5,6 +5,7 @@ from aiogram.utils.keyboard import (
 )
 
 import handlers.buttons as buttons
+from utils.public_resources import TELEGRAM_CHANNEL_URL
 from utils.translator import translator as ts
 
 MAIN_MENU_REPLY_KEYBOARD = ReplyKeyboardBuilder()
@@ -80,7 +81,7 @@ PROMO_SELECT_TARIFF_INLINE_KEYBOARD.adjust(1, 1, 1, 1, 1)
 MY_PROFILE_INLINE_KEYBOARD = InlineKeyboardBuilder()
 MY_PROFILE_INLINE_KEYBOARD.button(
     text=ts.get("ru", "SUBSCRIBE_ON_CHANNEL"),
-    url="https://t.me/monkeyisland_news",
+    url=TELEGRAM_CHANNEL_URL,
     style="danger",
 )
 
