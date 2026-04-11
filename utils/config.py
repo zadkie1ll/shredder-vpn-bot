@@ -12,6 +12,7 @@ MI_VPN_BOT_REDIS_QUEUE_NAME = "MI_VPN_BOT_REDIS_QUEUE_NAME"
 MI_VPN_TW_ENABLED = "MI_VPN_TW_ENABLED"
 MI_VPN_BOT_REFERRAL_BONUS = "MI_VPN_BOT_REFERRAL_BONUS"
 MI_VPN_BOT_REFERRER_BONUS = "MI_VPN_BOT_REFERRER_BONUS"
+MI_VPN_BOT_PROXY_URL = "MI_VPN_BOT_PROXY_URL"
 
 # mbms
 MI_VPN_BOT_RWMS_ADDR = "MI_VPN_BOT_RWMS_ADDR"
@@ -73,6 +74,7 @@ class Config:
 
         self.log_level: str = os.getenv(MI_VPN_BOT_LOG_LEVEL, "info")
         self.bot_token: str = self.__read_required_str_env(MI_VPN_BOT_TOKEN)
+        self.proxy_url: str | None = os.getenv(MI_VPN_BOT_PROXY_URL)
 
         self.trial_period_days: int = self.__read_int_env(
             MI_VPN_BOT_TRIAL_PERIOD_DAYS, "7"

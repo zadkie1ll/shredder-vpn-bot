@@ -5,6 +5,7 @@ import alembic.config
 from alembic import command
 from aiogram import Bot
 from aiogram import Dispatcher
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -44,9 +45,14 @@ async def main(config: Config) -> None:
         dispatcher.message.middleware(GlobalErrorMiddleware())
         dispatcher.callback_query.middleware(GlobalErrorMiddleware())
 
+        bot_session = AiohttpSession(proxy=config.proxy_url)
+        if config.proxy_url:
+            logging.info("Telegram Bot API proxy is enabled")
+
         bot = Bot(
             token=config.bot_token,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+            session=bot_session,
         )
 
         try:
