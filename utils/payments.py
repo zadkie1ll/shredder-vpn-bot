@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import re
 from wrapt import partial
 from yookassa import Payment
 from yookassa import Configuration
@@ -11,10 +12,14 @@ from utils.public_resources import TELEGRAM_BOT_URL
 
 RECEIPT_EMAIL = "receipts@orpheous.ru"
 PAYMENT_SERVICE_NAME = "shredder VPS"
+OLD_PAYMENT_SERVICE_NAME_PATTERN = re.compile(r"monkey[-\s]?island", re.IGNORECASE)
 
 
 def build_payment_description(tariff: Tariff) -> str:
     description = tariff.description
+    description = OLD_PAYMENT_SERVICE_NAME_PATTERN.sub(
+        PAYMENT_SERVICE_NAME, description
+    )
     description = description.replace("shredderVPN", PAYMENT_SERVICE_NAME)
     description = description.replace("shredder VPN", PAYMENT_SERVICE_NAME)
     description = description.replace("VPN", "VPS")
