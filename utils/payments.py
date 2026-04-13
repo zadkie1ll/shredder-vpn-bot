@@ -12,22 +12,21 @@ from utils.public_resources import TELEGRAM_BOT_URL
 
 RECEIPT_EMAIL = "receipts@orpheous.ru"
 PAYMENT_SERVICE_NAME = "shredder VPS"
-OLD_PAYMENT_SERVICE_NAME_PATTERN = re.compile(r"monkey[-\s]?island", re.IGNORECASE)
+PAYMENT_SERVICE_NAME_PATTERN = re.compile(
+    r"\b(?:monkey[-\s]?island|shredder\s*VPN|shredderVPN|shredder\s*VPS)\b\s*:?\s*",
+    re.IGNORECASE,
+)
 
 
 def build_payment_description(tariff: Tariff) -> str:
-    description = tariff.description
-    description = OLD_PAYMENT_SERVICE_NAME_PATTERN.sub(
-        PAYMENT_SERVICE_NAME, description
-    )
-    description = description.replace("shredderVPN", PAYMENT_SERVICE_NAME)
-    description = description.replace("shredder VPN", PAYMENT_SERVICE_NAME)
+    description = PAYMENT_SERVICE_NAME_PATTERN.sub("", tariff.description)
     description = description.replace("VPN", "VPS")
+    description = re.sub(r"\s+", " ", description).strip(" :-")
 
-    if PAYMENT_SERVICE_NAME in description:
-        return description
+    if not description:
+        return PAYMENT_SERVICE_NAME
 
-    return f"{PAYMENT_SERVICE_NAME}: {description}"
+    return f"{PAYMENT_SERVICE_NAME} {description}"
 
 
 def create_payment_sync(
