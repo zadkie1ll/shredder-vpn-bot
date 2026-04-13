@@ -9,6 +9,8 @@ from common.models.tariff import Tariff
 from common.models.tariff import TrialPromotionTariff
 from utils.public_resources import TELEGRAM_BOT_URL
 
+RECEIPT_EMAIL = "receipts@orpheous.ru"
+
 
 def create_payment_sync(
     shop_id: str, secret: str, tariff: Tariff, username: str, telegram_id: int
@@ -34,6 +36,25 @@ def create_payment_sync(
             },
             "capture": True,
             "description": tariff.description,
+            "receipt": {
+                "customer": {
+                    "email": RECEIPT_EMAIL,
+                },
+                "items": [
+                    {
+                        "description": tariff.description,
+                        "quantity": "1.00",
+                        "amount": {
+                            "value": f"{tariff.price:.2f}",
+                            "currency": "RUB",
+                        },
+                        "vat_code": 1,
+                        "payment_mode": "full_payment",
+                        "payment_subject": "service",
+                        "measure": "piece",
+                    }
+                ],
+            },
         }
     )
 
