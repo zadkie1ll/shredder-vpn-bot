@@ -10,6 +10,19 @@ from common.models.tariff import TrialPromotionTariff
 from utils.public_resources import TELEGRAM_BOT_URL
 
 RECEIPT_EMAIL = "receipts@orpheous.ru"
+PAYMENT_SERVICE_NAME = "shredder VPS"
+
+
+def build_payment_description(tariff: Tariff) -> str:
+    description = tariff.description
+    description = description.replace("shredderVPN", PAYMENT_SERVICE_NAME)
+    description = description.replace("shredder VPN", PAYMENT_SERVICE_NAME)
+    description = description.replace("VPN", "VPS")
+
+    if PAYMENT_SERVICE_NAME in description:
+        return description
+
+    return f"{PAYMENT_SERVICE_NAME}: {description}"
 
 
 def create_payment_sync(
@@ -17,6 +30,7 @@ def create_payment_sync(
 ) -> str:
     Configuration.account_id = shop_id
     Configuration.secret_key = secret
+    payment_description = build_payment_description(tariff)
 
     payment = Payment.create(
         {
@@ -35,14 +49,14 @@ def create_payment_sync(
                 "from_trial": False,
             },
             "capture": True,
-            "description": tariff.description,
+            "description": payment_description,
             "receipt": {
                 "customer": {
                     "email": RECEIPT_EMAIL,
                 },
                 "items": [
                     {
-                        "description": tariff.description,
+                        "description": payment_description,
                         "quantity": "1.00",
                         "amount": {
                             "value": f"{tariff.price:.2f}",
