@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Публичная оферта | shredderVPN</title>
+    <meta
+      name="description"
+      content="Публичная оферта на оказание услуг доступа к сервису shredderVPN."
+    >
+    <style>
+      :root {
+        --bg: #050505;
+        --surface: #101010;
+        --surface-raised: #161616;
+        --text: #f3f3f3;
+        --muted: #b7b7b7;
+        --border: #313131;
+        --accent: #9be22e;
+        --accent-dark: #7fc51f;
+        --accent-purple: #7b22e8;
+        --ink: #ffffff;
+        --metal: #d9dce0;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+        line-height: 1.65;
+        color: var(--text);
+        background: var(--bg);
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+
+      .page {
+        min-height: 100vh;
+      }
+
+      .topbar {
+        background: #000000;
+        color: #ffffff;
+        border-bottom: 1px solid rgba(155, 226, 46, 0.28);
+      }
+
+      .topbar-inner {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 18px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        color: #ffffff;
+        font-weight: 800;
+        font-size: 20px;
+        text-decoration: none;
+      }
+
+      .brand-logo {
+        width: 42px;
+        height: 42px;
+        border-radius: 8px;
+        object-fit: cover;
+        background: #000000;
+        border: 1px solid rgba(155, 226, 46, 0.55);
+      }
+
+      .nav {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 14px;
+        font-size: 15px;
+      }
+
+      .nav a {
+        color: rgba(255, 255, 255, 0.9);
+        text-decoration: none;
+      }
+
+      .nav a:hover {
+        color: var(--accent);
+      }
+
+      .hero {
+        background:
+          linear-gradient(135deg, rgba(123, 34, 232, 0.55) 0%, rgba(0, 0, 0, 0) 38%),
+          linear-gradient(180deg, #000000 0%, #101010 100%);
+        color: #ffffff;
+      }
+
+      .hero-inner {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 58px 24px 46px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(220px, 340px);
+        gap: 36px;
+        align-items: center;
+      }
+
+      .eyebrow {
+        margin: 0 0 14px;
+        color: var(--accent);
+        font-weight: 750;
+        letter-spacing: 0;
+        text-transform: uppercase;
+        font-size: 13px;
+      }
+
+      h1 {
+        max-width: 820px;
+        margin: 0;
+        font-size: 68px;
+        line-height: 1.05;
+        letter-spacing: 0;
+      }
+
+      .lead {
+        max-width: 780px;
+        margin: 24px 0 0;
+        color: rgba(255, 255, 255, 0.84);
+        font-size: 19px;
+      }
+
+      .hero-media {
+        display: flex;
+        justify-content: center;
+      }
+
+      .hero-avatar {
+        width: min(100%, 320px);
+        aspect-ratio: 1;
+        object-fit: contain;
+        filter: drop-shadow(0 28px 34px rgba(0, 0, 0, 0.65));
+      }
+
+      .actions {
+        margin-top: 30px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .button {
+        display: inline-flex;
+        min-height: 44px;
+        align-items: center;
+        justify-content: center;
+        padding: 10px 18px;
+        border-radius: 8px;
+        background: var(--accent);
+        color: #050505;
+        font-weight: 750;
+        text-decoration: none;
+      }
+
+      .button.secondary {
+        background: transparent;
+        border: 1px solid rgba(155, 226, 46, 0.58);
+        color: #ffffff;
+      }
+
+      main {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 34px 24px 64px;
+      }
+
+      .notice {
+        margin: 0 0 24px;
+        padding: 18px 20px;
+        border: 1px solid var(--border);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+        gap: 28px;
+        align-items: start;
+      }
+
+      .toc {
+        position: sticky;
+        top: 18px;
+        padding: 18px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      .toc-title {
+        margin: 0 0 12px;
+        font-weight: 800;
+      }
+
+      .toc ol {
+        margin: 0;
+        padding-left: 20px;
+      }
+
+      .toc li + li {
+        margin-top: 8px;
+      }
+
+      .content {
+        padding: 34px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface-raised);
+      }
+
+      h2 {
+        margin: 34px 0 14px;
+        color: var(--ink);
+        font-size: 26px;
+        line-height: 1.25;
+        letter-spacing: 0;
+      }
+
+      h2:first-child {
+        margin-top: 0;
+      }
+
+      p {
+        margin: 0 0 14px;
+      }
+
+      ul {
+        margin: 0 0 16px;
+        padding-left: 24px;
+      }
+
+      li + li {
+        margin-top: 8px;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .details {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 12px 0 18px;
+      }
+
+      .details th,
+      .details td {
+        padding: 12px;
+        border: 1px solid var(--border);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .details th {
+        width: 34%;
+        background: #202020;
+        color: var(--metal);
+        font-weight: 800;
+      }
+
+      .details td {
+        color: #f0f0f0;
+      }
+
+      footer {
+        padding: 26px 24px 42px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      @media (max-width: 820px) {
+        .topbar-inner {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .nav {
+          justify-content: flex-start;
+        }
+
+        .hero-inner {
+          padding-top: 42px;
+          grid-template-columns: 1fr;
+        }
+
+        h1 {
+          font-size: 42px;
+        }
+
+        .hero-media {
+          justify-content: flex-start;
+        }
+
+        .hero-avatar {
+          width: min(100%, 240px);
+        }
+
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .toc {
+          position: static;
+        }
+
+        .content {
+          padding: 22px;
+        }
+
+        .details,
+        .details tbody,
+        .details tr,
+        .details th,
+        .details td {
+          display: block;
+          width: 100%;
+        }
+
+        .details th {
+          border-bottom: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="topbar">
+        <div class="topbar-inner">
+          <a class="brand" href="https://t.me/Shredder_vps_bot">
+            <img class="brand-logo" src="./shredder-avatar.png" alt="">
+            <span>shredderVPN</span>
+          </a>
+          <nav class="nav" aria-label="Основная навигация">
+            <a href="https://t.me/Shredder_vps_bot">Подключиться</a>
+            <a href="https://t.me/shredder_vps">Канал</a>
+            <a href="https://t.me/ShredderSUPPORT">Поддержка</a>
+          </nav>
+        </div>
+      </header>
+
+      <section class="hero">
+        <div class="hero-inner">
+          <div>
+            <p class="eyebrow">shredderVPN</p>
+            <h1>Публичная оферта</h1>
+            <p class="lead">
+              Условия оказания услуг доступа к VPN-сервису shredderVPN для пользователей,
+              которые подключаются и оплачивают подписку через Telegram-бота.
+            </p>
+            <div class="actions">
+              <a class="button" href="https://t.me/Shredder_vps_bot">Перейти в бот</a>
+              <a class="button secondary" href="https://t.me/ShredderSUPPORT">Написать в поддержку</a>
+            </div>
+          </div>
+          <div class="hero-media" aria-hidden="true">
+            <img class="hero-avatar" src="./shredder-avatar.png" alt="">
+          </div>
+        </div>
+      </section>
+
+      <main>
+        <div class="layout">
+          <aside class="toc" aria-label="Содержание">
+            <p class="toc-title">Содержание</p>
+            <ol>
+              <li><a href="#terms">Термины</a></li>
+              <li><a href="#subject">Предмет оферты</a></li>
+              <li><a href="#access">Порядок доступа</a></li>
+              <li><a href="#payment">Стоимость и оплата</a></li>
+              <li><a href="#trial">Пробные периоды</a></li>
+              <li><a href="#autopay">Автопродление</a></li>
+              <li><a href="#refunds">Возвраты</a></li>
+              <li><a href="#contacts">Контакты</a></li>
+            </ol>
+          </aside>
+
+          <article class="content">
+            <h2 id="terms">1. Термины</h2>
+            <p>
+              Настоящий документ является публичной офертой исполнителя и определяет
+              условия предоставления пользователям доступа к сервису shredderVPN.
+            </p>
+            <p>
+              Пользователь принимает условия оферты в момент оплаты подписки, начала
+              использования сервиса или совершения иных действий, явно направленных на
+              получение доступа к shredderVPN.
+            </p>
+            <ul>
+              <li><strong>Сервис</strong> — VPN-сервис shredderVPN, доступ к которому предоставляется через Telegram-бота.</li>
+              <li><strong>Бот</strong> — Telegram-бот <a href="https://t.me/Shredder_vps_bot">@Shredder_vps_bot</a>.</li>
+              <li><strong>Подписка</strong> — оплаченный период доступа к сервису.</li>
+              <li><strong>Ключ доступа</strong> — индивидуальная ссылка или иной набор данных, необходимый для подключения.</li>
+            </ul>
+
+            <h2 id="subject">2. Предмет оферты</h2>
+            <p>
+              Исполнитель предоставляет пользователю доступ к VPN-инфраструктуре
+              shredderVPN на выбранный и оплаченный срок. Пользователь получает
+              инструкции по подключению, ключ доступа и возможность обращаться в
+              поддержку по вопросам работы сервиса.
+            </p>
+            <p>
+              Сервис предназначен для защиты интернет-соединения, повышения
+              конфиденциальности и стабильного доступа к сетевым ресурсам в пределах,
+              разрешенных применимым законодательством.
+            </p>
+
+            <h2 id="access">3. Порядок предоставления доступа</h2>
+            <p>
+              Доступ оформляется через Telegram-бота. После создания подписки бот
+              отправляет пользователю инструкции для выбранного устройства и ключ
+              доступа. Подписка активируется автоматически после успешной оплаты или
+              выдачи пробного периода.
+            </p>
+            <p>
+              Пользователь обязуется хранить ключ доступа в безопасности и не
+              передавать его третьим лицам для перепродажи, массового распространения
+              или иной коммерческой эксплуатации.
+            </p>
+
+            <h2 id="payment">4. Стоимость и оплата</h2>
+            <p>
+              Актуальная стоимость тарифов отображается в Telegram-боте перед оплатой.
+              Оплата производится в рублях через платежного провайдера, подключенного
+              к сервису. Факт оплаты подтверждает согласие пользователя с условиями
+              настоящей оферты.
+            </p>
+            <p>
+              Исполнитель вправе менять стоимость тарифов. Изменения не влияют на уже
+              оплаченный период доступа и применяются к новым оплатам или продлениям.
+            </p>
+
+            <h2 id="trial">5. Пробные периоды</h2>
+            <p>
+              Новым пользователям может предоставляться бесплатный пробный период без
+              привязки платежных данных. После окончания бесплатного пробного периода
+              доступ прекращается, если пользователь не выбрал и не оплатил тариф.
+            </p>
+            <p>
+              Также сервис может предлагать разовый пробный платный тариф, например
+              доступ на несколько дней по специальной цене. Условия такого тарифа
+              отображаются в Telegram-боте перед оплатой.
+            </p>
+
+            <h2 id="autopay">6. Автопродление подписки</h2>
+            <p>
+              При оплате подписки платежный метод пользователя может быть сохранен
+              платежным провайдером для автоматического продления доступа. Списание
+              выполняется ближе к окончанию оплаченного периода, если автопродление
+              доступно и не отключено пользователем.
+            </p>
+            <p>
+              Отключить автопродление можно в любой момент командой
+              <strong>/cancelautopay</strong> в Telegram-боте или через обращение в
+              поддержку. Отключение автопродления не отменяет уже оплаченный период.
+            </p>
+            <p>
+              Исполнитель может отправлять уведомления о состоянии подписки, но не
+              гарантирует доставку каждого уведомления из-за ограничений Telegram,
+              платежных систем и сетевых сервисов.
+            </p>
+
+            <h2 id="refunds">7. Возврат средств</h2>
+            <p>
+              Если сервис не работает по техническим причинам на стороне исполнителя,
+              пользователь может обратиться в поддержку и описать проблему. Заявки на
+              возврат рассматриваются индивидуально с учетом даты оплаты, факта
+              использования сервиса и характера неполадки.
+            </p>
+            <p>
+              Возврат не предоставляется, если доступ был ограничен из-за нарушения
+              правил использования, передачи ключа третьим лицам, некорректной
+              настройки устройства пользователя или ограничений внешних сервисов,
+              которые не контролируются исполнителем.
+            </p>
+
+            <h2 id="rules">8. Правила использования</h2>
+            <p>Пользователь обязуется не использовать сервис для:</p>
+            <ul>
+              <li>нарушения законодательства, прав третьих лиц или правил интернет-площадок;</li>
+              <li>массовых рассылок, атак, сканирования сетей и иной вредоносной активности;</li>
+              <li>распространения вредоносного программного обеспечения;</li>
+              <li>сканирования портов, подбора паролей, фишинга и похожих действий;</li>
+              <li>перепродажи доступа без письменного согласия исполнителя;</li>
+              <li>действий, которые создают чрезмерную нагрузку на инфраструктуру сервиса.</li>
+            </ul>
+            <p>
+              При нарушении этих условий исполнитель вправе ограничить или прекратить
+              доступ пользователя к сервису без компенсации.
+            </p>
+
+            <h2 id="responsibility">9. Ответственность и ограничения</h2>
+            <p>
+              Исполнитель стремится обеспечивать стабильную работу сервиса, но не
+              гарантирует непрерывную доступность всех серверов, локаций, сайтов и
+              внешних сервисов. Возможны временные ограничения, связанные с техническим
+              обслуживанием, сбоями сетей, действиями провайдеров и изменениями правил
+              сторонних площадок.
+            </p>
+            <p>
+              Пользователь самостоятельно отвечает за соблюдение законодательства и
+              правил сервисов, к которым получает доступ с использованием VPN.
+            </p>
+
+            <h2 id="force-majeure">10. Форс-мажор</h2>
+            <p>
+              Стороны освобождаются от ответственности за частичное или полное
+              неисполнение обязательств, если оно вызвано обстоятельствами
+              непреодолимой силы: сбоями магистральных сетей, действиями государственных
+              органов, изменениями законодательства, авариями, стихийными бедствиями и
+              другими событиями, на которые стороны не могут разумно повлиять.
+            </p>
+
+            <h2 id="privacy">11. Персональные данные</h2>
+            <p>
+              Для работы сервиса могут обрабатываться данные Telegram-профиля,
+              сведения о подписке, платежные статусы и технические данные, необходимые
+              для предоставления доступа и поддержки. Платежные данные банковских карт
+              обрабатываются платежным провайдером и не хранятся в сервисе shredderVPN.
+            </p>
+
+            <h2 id="changes">12. Изменение условий</h2>
+            <p>
+              Исполнитель вправе обновлять условия оферты. Новая редакция применяется
+              с момента публикации на этой странице, если в тексте не указан иной срок.
+              Продолжение использования сервиса после публикации изменений означает
+              согласие пользователя с новой редакцией.
+            </p>
+
+            <h2 id="contacts">13. Контакты и реквизиты</h2>
+            <p>
+              По вопросам подключения, оплаты, возврата и работы сервиса обращайтесь в
+              поддержку: <a href="https://t.me/ShredderSUPPORT">@ShredderSUPPORT</a>.
+              Новости сервиса публикуются в канале
+              <a href="https://t.me/shredder_vps">@shredder_vps</a>.
+            </p>
+            <table class="details">
+              <tbody>
+                <tr>
+                  <th>Исполнитель</th>
+                  <td>СВИРИДЕНКО СТАНИСЛАВ ВАЛЕРЬЕВИЧ (ИП)</td>
+                </tr>
+                <tr>
+                  <th>ИНН</th>
+                  <td>616706684677</td>
+                </tr>
+                <tr>
+                  <th>Адрес</th>
+                  <td>проспект 40-летия Победы, д. 63/17, корп./ст. 3, кв./оф. 328, Ростовская область, г. Ростов-на-Дону</td>
+                </tr>
+                <tr>
+                  <th>Банк</th>
+                  <td>ФИЛИАЛ "РОСТОВСКИЙ" АО "АЛЬФА-БАНК"</td>
+                </tr>
+                <tr>
+                  <th>Номер счёта</th>
+                  <td>40802810426340008508</td>
+                </tr>
+                <tr>
+                  <th>Валюта</th>
+                  <td>RUR</td>
+                </tr>
+                <tr>
+                  <th>БИК</th>
+                  <td>046015207</td>
+                </tr>
+                <tr>
+                  <th>Корреспондентский счёт</th>
+                  <td>30101810500000000207</td>
+                </tr>
+                <tr>
+                  <th>Telegram</th>
+                  <td><a href="https://t.me/ShredderSUPPORT">https://t.me/ShredderSUPPORT</a></td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="muted">
+              Редакция от 14 апреля 2026 года.
+            </p>
+          </article>
+        </div>
+      </main>
+
+      <footer>
+        shredderVPN · Публичная оферта
+      </footer>
+    </div>
+  </body>
+</html>
