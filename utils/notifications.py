@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.exceptions import TelegramRetryAfter
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from common.models.tariff import TrialPromotionTariff
 from common.models.tariff import str_to_tariff
 from common.models.tariff import tariff_to_human_str
 from common.models.messages import NotificateUserMessage
@@ -74,6 +75,13 @@ NOTIFICATION_CONFIG = {
         "static": ts.get("ru", "NOTIFY_REFERRAL_PURCHASE_BONUS_APPLIED")
     },
 }
+
+
+def format_trial_promo_text(text: str) -> str:
+    if "{}" not in text:
+        return text
+
+    return text.format(TrialPromotionTariff().price)
 
 
 def pluralize_ru(count: int, forms: tuple[str, str, str]) -> str:
@@ -178,6 +186,9 @@ async def process_notification(
                 )
             else:
                 text_to_send = config["promo"] if not has_payment else config["regular"]
+
+            if not has_payment:
+                text_to_send = format_trial_promo_text(text_to_send)
 
             if has_payment:
                 markup = markups.SELECT_TARIFF_INLINE_KEYBOARD.as_markup()
