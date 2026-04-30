@@ -58,12 +58,14 @@ async def save_user_in_db(
             username,
             referred_by_id,
             referral_type,
+            autopay_allow,
             expire_at
         ) VALUES (
             :telegram_id,
             :username,
             :referred_by_id,
             :referral_type,
+            :autopay_allow,
             (:expire_at)::timestamp
         )
         ON CONFLICT (telegram_id) DO UPDATE SET username = :username, expire_at = (:expire_at)::timestamp
@@ -83,6 +85,7 @@ async def save_user_in_db(
             "username": username,
             "referred_by_id": referrer_id,
             "referral_type": ReferralType.STANDARD if referrer_id is not None else None,
+            "autopay_allow": True,
         },
     )
 
