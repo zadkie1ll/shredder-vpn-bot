@@ -120,6 +120,48 @@ async def has_payment_for_user_by_tg_id(
     return result.scalars().first() is not None
 
 
+async def has_saved_notification(
+    session: AsyncSession, telegram_id: int, notification_type: str
+) -> bool:
+    if notification_type == "subscription-expired":
+        query = text("""
+            SELECT 1
+            FROM expired_users_notifications eun
+            JOIN users u ON u.id = eun.user_id
+            WHERE u.telegram_id = :telegram_id
+            LIMIT 1
+        """)
+    elif notification_type == "nc-yesterday-created":
+        query = text("""
+            SELECT 1
+            FROM nc_users_notifications nun
+            JOIN users u ON u.id = nun.user_id
+            WHERE u.telegram_id = :telegram_id
+            LIMIT 1
+        """)
+    elif notification_type == "1-day-left":
+        query = text("""
+            SELECT 1
+            FROM extend_subscription_notifications esn
+            JOIN users u ON u.id = esn.user_id
+            WHERE u.telegram_id = :telegram_id AND esn.one_day_before = TRUE
+            LIMIT 1
+        """)
+    elif notification_type == "3-days-left":
+        query = text("""
+            SELECT 1
+            FROM extend_subscription_notifications esn
+            JOIN users u ON u.id = esn.user_id
+            WHERE u.telegram_id = :telegram_id AND esn.three_days_before = TRUE
+            LIMIT 1
+        """)
+    else:
+        return False
+
+    result = await session.execute(query, {"telegram_id": telegram_id})
+    return result.first() is not None
+
+
 async def has_autopay(session: AsyncSession, telegram_id: int) -> bool:
     stmt = (
         select(YkRecurrentPayment)

@@ -20,6 +20,7 @@ from utils.redis_message_broker import RedisMessageBroker
 from utils.translator import translator as ts
 
 from utils.sql_helpers import (
+    has_saved_notification,
     has_payment_for_user_by_tg_id,
     save_notified_expired_user,
     save_notified_nc_user,
@@ -144,6 +145,20 @@ async def process_notification(
     if not config:
         logging.warning(f"unknown notification type: {notification_type}")
         return
+
+    if "save_func" in config:
+        async with session_maker() as session:
+            already_sent = await has_saved_notification(
+                session=session,
+                telegram_id=telegram_id,
+                notification_type=notification_type,
+            )
+
+        if already_sent:
+            logging.info(
+                f"skipping duplicate notification '{notification_type}' for user {telegram_id}"
+            )
+            return
 
     text_to_send = None
     markup = None
