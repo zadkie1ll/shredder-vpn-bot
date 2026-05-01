@@ -209,8 +209,13 @@ async def save_notified_one_day_left_user(
     session: AsyncSession, telegram_id: int
 ) -> None:
     query = text("""
-        INSERT INTO extend_subscription_notifications (user_id, one_day_before)
-        SELECT id, :flag FROM users WHERE telegram_id = :telegram_id ON CONFLICT (user_id) DO
+        INSERT INTO extend_subscription_notifications (
+            user_id, three_days_before, one_day_before
+        )
+        SELECT id, FALSE, :flag
+        FROM users
+        WHERE telegram_id = :telegram_id
+        ON CONFLICT (user_id) DO
         UPDATE SET one_day_before = :flag
     """)
 
@@ -221,8 +226,13 @@ async def save_notified_three_days_left_user(
     session: AsyncSession, telegram_id: int
 ) -> None:
     query = text("""
-        INSERT INTO extend_subscription_notifications (user_id, three_days_before)
-        SELECT id, :flag FROM users WHERE telegram_id = :telegram_id ON CONFLICT (user_id) DO
+        INSERT INTO extend_subscription_notifications (
+            user_id, three_days_before, one_day_before
+        )
+        SELECT id, :flag, FALSE
+        FROM users
+        WHERE telegram_id = :telegram_id
+        ON CONFLICT (user_id) DO
         UPDATE SET three_days_before = :flag
     """)
 
