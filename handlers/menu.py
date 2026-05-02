@@ -171,6 +171,30 @@ async def __main_menu_button_clicked(
                 logging.info(f"subscription for user {log_user} created successfully")
         else:
             async with tx(session_maker) as session:
+                db_user = await get_user_by_telegram_id(session, message.from_user.id)
+
+                if db_user is None:
+                    logging.warning(
+                        f"user {log_user} has RWMS subscription but is missing in DB; restoring"
+                    )
+
+                    expire_at = None
+
+                    if rw_user.HasField("expire_at"):
+                        expire_at = rw_user.expire_at.ToDatetime()
+
+                    db_user = await save_user_in_db(
+                        session=session,
+                        username=username,
+                        referrer_id=None,
+                        telegram_id=message.from_user.id,
+                        expire_at=expire_at,
+                    )
+
+                    await add_user_to_traffic_progress(
+                        session=session, telegram_id=message.from_user.id
+                    )
+
                 found_event, prev_traffic_source = (
                     await get_last_traffic_source_by_telegram_id(
                         session, message.from_user.id
