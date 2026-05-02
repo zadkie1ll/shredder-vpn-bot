@@ -103,8 +103,12 @@ async def save_user_in_db(
 
 async def add_user_to_traffic_progress(session: AsyncSession, telegram_id: int) -> None:
     query = text("""
-            INSERT INTO user_traffic_progress (user_id)
-            SELECT id FROM users WHERE telegram_id = :telegram_id
+            INSERT INTO user_traffic_progress (
+                user_id, passed_0, passed_5mb, passed_100mb
+            )
+            SELECT id, FALSE, FALSE, FALSE
+            FROM users
+            WHERE telegram_id = :telegram_id
             ON CONFLICT (user_id) DO NOTHING
         """)
 
