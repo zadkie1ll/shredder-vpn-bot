@@ -20,12 +20,7 @@ from utils.redis_message_broker import RedisMessageBroker
 from utils.translator import translator as ts
 
 from utils.sql_helpers import (
-    has_saved_notification,
     has_payment_for_user_by_tg_id,
-    save_notified_expired_user,
-    save_notified_nc_user,
-    save_notified_three_days_left_user,
-    save_notified_one_day_left_user,
 )
 
 sub_expired_promo_msgs = [
@@ -46,21 +41,17 @@ NOTIFICATION_CONFIG = {
     "subscription-expired": {
         "promo": sub_expired_promo_msgs,
         "regular": ts.get("ru", "NOTIFY_EXPIRED_USER"),
-        "save_func": save_notified_expired_user,
     },
     "3-days-left": {
         "promo": ts.get("ru", "NOTIFY_THREE_DAYS_LEFT_PROMO"),
         "regular": ts.get("ru", "NOTIFY_THREE_DAYS_LEFT"),
-        "save_func": save_notified_three_days_left_user,
     },
     "1-day-left": {
         "promo": ts.get("ru", "NOTIFY_ONE_DAY_LEFT_PROMO"),
         "regular": ts.get("ru", "NOTIFY_ONE_DAY_LEFT"),
-        "save_func": save_notified_one_day_left_user,
     },
     "nc-yesterday-created": {
         "random_list": nc_msgs,
-        "save_func": save_notified_nc_user,
     },
     "purchase-success-non-autopay": {
         "static": ts.get("ru", "NOTIFY_SUCCESSFUL_NON_AUTOPAY")
@@ -146,20 +137,6 @@ async def process_notification(
         logging.warning(f"unknown notification type: {notification_type}")
         return
 
-    if "save_func" in config:
-        async with session_maker() as session:
-            already_sent = await has_saved_notification(
-                session=session,
-                telegram_id=telegram_id,
-                notification_type=notification_type,
-            )
-
-        if already_sent:
-            logging.info(
-                f"skipping duplicate notification '{notification_type}' for user {telegram_id}"
-            )
-            return
-
     text_to_send = None
     markup = None
 
@@ -218,14 +195,6 @@ async def process_notification(
     if notified:
         logging.info(
             f"notification '{notification_type}' for user {telegram_id} handled"
-        )
-
-    if notified and "save_func" in config:
-        async with session_maker() as session:
-            async with session.begin():
-                await config["save_func"](session=session, telegram_id=telegram_id)
-        logging.debug(
-            f"saved notification record for user {telegram_id} and type '{notification_type}'"
         )
 
 
