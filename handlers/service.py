@@ -1,9 +1,12 @@
 import asyncio
 import logging
 import sqlalchemy
+from collections import defaultdict
+from datetime import date
 from datetime import time
 from datetime import datetime
 from datetime import timedelta
+from html import escape
 
 from aiogram import F
 from aiogram import Router
@@ -14,6 +17,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramRetryAfter
 from sqlalchemy.types import Integer
+from sqlalchemy import and_
+from sqlalchemy import func
+from sqlalchemy import or_
+from sqlalchemy import select
 
 from handlers.broadcast_states import BroadcastStates
 from utils.config import Config
@@ -24,6 +31,7 @@ from common.models.db import EventLog
 from common.models.db import YkPayment
 from common.models.db import UserTrafficProgress
 from common.models.db import YkRecurrentPayment
+from common.models.db import TrafficSource
 from common.models.tariff import OneDayTariff
 from common.models.tariff import OneMonthTariff
 from common.models.tariff import ThreeMonthsTariff
@@ -214,6 +222,321 @@ async def __process_broadcast_confirm(
         await asyncio.sleep(0.05)  # Небольшая пауза между сообщениями
 
     await call.message.answer(f"✅ Рассылка завершена! Получили: {count} чел.")
+
+
+TABLE_REPORT_TARIFFS = {
+    "month": "249",
+    "threemonths": "599",
+    "year": "1799",
+}
+
+
+def parse_report_date(value: str) -> date:
+    """Парсит дату отчета в формате DD.MM.YYYY."""
+    return datetime.strptime(value, "%d.%m.%Y").date()
+
+
+def iter_report_dates(start_date: date, end_date: date):
+    current_date = start_date
+    while current_date <= end_date:
+        yield current_date
+        current_date += timedelta(days=1)
+
+
+def source_display_name(
+    traffic_source: int | None, traffic_sources: dict[int, str]
+) -> str:
+    if traffic_source is None:
+        return "Direct"
+    return traffic_sources.get(traffic_source, f"TS_{traffic_source}")
+
+
+@service_router.message(
+    F.text.startswith("/table-report") | F.text.startswith("/sheet-report"), IsAdmin()
+)
+async def __on_table_report_requested(
+    message: Message,
+    config: Config,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    args = message.text.split()[1:] if message.text else []
+
+    if len(args) < 2:
+        await message.answer(
+            "❌ Неверный формат команды.\n"
+            "Используйте: <code>/table-report 01.05.2026 07.05.2026</code>"
+        )
+        return
+
+    try:
+        start_date = parse_report_date(args[0])
+        end_date = parse_report_date(args[1])
+
+        if start_date > end_date:
+            await message.answer("❌ Начальная дата не может быть больше конечной даты")
+            return
+    except ValueError:
+        await message.answer(
+            "❌ Неверный формат даты. Используйте формат DD.MM.YYYY"
+        )
+        return
+
+    processing_msg = await message.answer("🔄 Собираем отчет для таблицы...")
+
+    try:
+        async with tx(session_maker) as session:
+            report_data = await get_table_report_data(
+                session=session,
+                start_date=start_date,
+                end_date=end_date,
+                trial_period_days=config.trial_period_days,
+            )
+
+        report_messages = generate_table_report_messages(
+            report_data=report_data,
+            start_date=start_date,
+            end_date=end_date,
+            trial_period_days=config.trial_period_days,
+        )
+
+        await processing_msg.delete()
+
+        for report_message in report_messages:
+            await message.answer(text=report_message)
+            await asyncio.sleep(0.5)
+    except Exception as e:
+        await processing_msg.delete()
+        await message.answer(f"❌ Ошибка при формировании отчета: {str(e)}")
+        logging.exception("Error generating table report")
+
+
+async def get_table_report_data(
+    session,
+    start_date: date,
+    end_date: date,
+    trial_period_days: int,
+) -> dict:
+    start_datetime = datetime.combine(start_date, time.min)
+    end_datetime = datetime.combine(end_date, time.max)
+
+    trial_lookup_start = start_datetime - timedelta(days=trial_period_days)
+
+    subscription_events_query = (
+        select(EventLog.user_id, EventLog.event_payload, EventLog.timestamp)
+        .where(
+            and_(
+                EventLog.event_type == "subscription_created",
+                EventLog.timestamp >= trial_lookup_start,
+                EventLog.timestamp <= end_datetime,
+            )
+        )
+        .order_by(EventLog.timestamp.asc())
+    )
+    subscription_events_result = await session.execute(subscription_events_query)
+    subscription_events = subscription_events_result.all()
+
+    report_user_ids = {
+        row.user_id
+        for row in subscription_events
+        if start_datetime <= row.timestamp <= end_datetime
+    }
+    trial_window_user_ids = {row.user_id for row in subscription_events}
+    tracked_user_ids = report_user_ids | trial_window_user_ids
+
+    payment_filters = [
+        and_(
+            YkPayment.created_at >= start_datetime,
+            YkPayment.created_at <= end_datetime,
+        )
+    ]
+
+    if tracked_user_ids:
+        payment_filters.append(YkPayment.user_id.in_(tracked_user_ids))
+
+    payments_query = (
+        select(
+            YkPayment.user_id,
+            YkPayment.subscription_period,
+            YkPayment.created_at,
+        )
+        .where(
+            and_(
+                YkPayment.status == "succeeded",
+                or_(*payment_filters),
+            )
+        )
+        .order_by(YkPayment.created_at.asc())
+    )
+    payments_result = await session.execute(payments_query)
+    payments = payments_result.all()
+
+    traffic_sources_result = await session.execute(select(TrafficSource))
+    traffic_sources = {
+        traffic_source.id: traffic_source.name
+        for traffic_source in traffic_sources_result.scalars().all()
+    }
+
+    daily_stats = {
+        current_date: {
+            "new_users": 0,
+            "trial_users": 0,
+            "trial_bounced": 0,
+            "tariffs": {
+                tariff_price: 0 for tariff_price in TABLE_REPORT_TARIFFS.values()
+            },
+        }
+        for current_date in iter_report_dates(start_date, end_date)
+    }
+
+    users = {}
+    source_stats = defaultdict(lambda: {"new_users": 0, "paid_users": set()})
+
+    for row in subscription_events:
+        traffic_source = row.event_payload.get("traffic_source")
+        users[row.user_id] = {
+            "created_at": row.timestamp,
+            "traffic_source": traffic_source,
+        }
+
+        created_date = row.timestamp.date()
+        if start_date <= created_date <= end_date:
+            daily_stats[created_date]["new_users"] += 1
+            source_stats[traffic_source]["new_users"] += 1
+
+    payments_by_user = defaultdict(list)
+    for payment in payments:
+        payments_by_user[payment.user_id].append(payment)
+
+        payment_date = payment.created_at.date()
+        if start_date <= payment_date <= end_date:
+            tariff_price = TABLE_REPORT_TARIFFS.get(payment.subscription_period)
+            if tariff_price is not None:
+                daily_stats[payment_date]["tariffs"][tariff_price] += 1
+
+            user_info = users.get(payment.user_id)
+            if user_info is not None and payment.user_id in report_user_ids:
+                source_stats[user_info["traffic_source"]]["paid_users"].add(
+                    payment.user_id
+                )
+
+    for user_id, user_info in users.items():
+        created_at = user_info["created_at"]
+        trial_ends_at = created_at + timedelta(days=trial_period_days)
+        user_payments = payments_by_user.get(user_id, [])
+
+        for current_date in iter_report_dates(start_date, end_date):
+            current_day_end = datetime.combine(current_date, time.max)
+
+            has_paid_by_day_end = any(
+                payment.created_at <= current_day_end for payment in user_payments
+            )
+
+            if created_at.date() <= current_date < trial_ends_at.date():
+                if not has_paid_by_day_end:
+                    daily_stats[current_date]["trial_users"] += 1
+
+            if trial_ends_at.date() == current_date and not has_paid_by_day_end:
+                daily_stats[current_date]["trial_bounced"] += 1
+
+    source_rows = []
+    for traffic_source, stats in source_stats.items():
+        source_rows.append(
+            {
+                "source": source_display_name(traffic_source, traffic_sources),
+                "new_users": stats["new_users"],
+                "paid_users": len(stats["paid_users"]),
+            }
+        )
+
+    source_rows.sort(key=lambda row: row["new_users"], reverse=True)
+
+    return {
+        "daily_stats": daily_stats,
+        "source_rows": source_rows,
+    }
+
+
+def generate_table_report_messages(
+    report_data: dict,
+    start_date: date,
+    end_date: date,
+    trial_period_days: int,
+) -> list[str]:
+    daily_stats = report_data["daily_stats"]
+    source_rows = report_data["source_rows"]
+
+    daily_lines = [
+        f"📋 <b>ТАБЛИЦА ЗА ПЕРИОД {start_date:%d.%m.%Y}-{end_date:%d.%m.%Y}</b>",
+        "",
+        "<code>Дата | Всего | На пробном | Отскочили | 249 | 599 | 1799",
+    ]
+
+    totals = {
+        "new_users": 0,
+        "trial_users": 0,
+        "trial_bounced": 0,
+        "tariffs": {
+            tariff_price: 0 for tariff_price in TABLE_REPORT_TARIFFS.values()
+        },
+    }
+
+    for current_date in iter_report_dates(start_date, end_date):
+        day_stats = daily_stats[current_date]
+        tariff_stats = day_stats["tariffs"]
+
+        daily_lines.append(
+            f"{current_date:%d.%m.%Y} | "
+            f"{day_stats['new_users']} | "
+            f"{day_stats['trial_users']} | "
+            f"{day_stats['trial_bounced']} | "
+            f"{tariff_stats['249']} | "
+            f"{tariff_stats['599']} | "
+            f"{tariff_stats['1799']}"
+        )
+
+        totals["new_users"] += day_stats["new_users"]
+        totals["trial_users"] += day_stats["trial_users"]
+        totals["trial_bounced"] += day_stats["trial_bounced"]
+        for tariff_price, count in tariff_stats.items():
+            totals["tariffs"][tariff_price] += count
+
+    daily_lines.append(
+        f"Итог | "
+        f"{totals['new_users']} | "
+        f"{totals['trial_users']} | "
+        f"{totals['trial_bounced']} | "
+        f"{totals['tariffs']['249']} | "
+        f"{totals['tariffs']['599']} | "
+        f"{totals['tariffs']['1799']}</code>"
+    )
+    daily_lines.append("")
+    daily_lines.append(
+        f"<i>Пробный период считается как {trial_period_days} дн. от даты /start. "
+        "Платные тарифы считаются по успешным платежам в дату платежа.</i>"
+    )
+
+    source_lines = [
+        f"📣 <b>ИСТОЧНИКИ ЗА ПЕРИОД {start_date:%d.%m.%Y}-{end_date:%d.%m.%Y}</b>",
+        "",
+        "<code>Источник | Прибавилось | Перешли на платный",
+    ]
+
+    if source_rows:
+        for source_row in source_rows:
+            source_lines.append(
+                f"{escape(source_row['source'])} | "
+                f"{source_row['new_users']} | "
+                f"{source_row['paid_users']}"
+            )
+    else:
+        source_lines.append("нет данных | 0 | 0")
+
+    source_lines[-1] = f"{source_lines[-1]}</code>"
+
+    return [
+        "\n".join(daily_lines),
+        "\n".join(source_lines),
+    ]
 
 
 @service_router.message(F.text.startswith("/statinterval"), IsAdmin())
@@ -703,10 +1026,6 @@ def generate_recurrents_report(stats: dict) -> str:
     report += "\n💡 <i>Примечание: MRR рассчитывается как сумма всех подписок, приведенная к 1 месяцу.</i>"
 
     return report
-
-
-from datetime import datetime
-from sqlalchemy import select, func
 
 
 @service_router.message(F.text.startswith("/payments"), IsAdmin())
