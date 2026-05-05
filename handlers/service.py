@@ -471,14 +471,7 @@ def generate_table_report_messages(
         "<code>Дата | Всего | На пробном | Отскочили | 249 | 599 | 1799",
     ]
 
-    totals = {
-        "new_users": 0,
-        "trial_users": 0,
-        "trial_bounced": 0,
-        "tariffs": {
-            tariff_price: 0 for tariff_price in TABLE_REPORT_TARIFFS.values()
-        },
-    }
+    total_new_users = 0
 
     for current_date in iter_report_dates(start_date, end_date):
         day_stats = daily_stats[current_date]
@@ -494,20 +487,19 @@ def generate_table_report_messages(
             f"{tariff_stats['1799']}"
         )
 
-        totals["new_users"] += day_stats["new_users"]
-        totals["trial_users"] += day_stats["trial_users"]
-        totals["trial_bounced"] += day_stats["trial_bounced"]
-        for tariff_price, count in tariff_stats.items():
-            totals["tariffs"][tariff_price] += count
+        total_new_users += day_stats["new_users"]
+
+    last_day_stats = daily_stats[end_date]
+    last_day_tariffs = last_day_stats["tariffs"]
 
     daily_lines.append(
         f"Итог | "
-        f"{totals['new_users']} | "
-        f"{totals['trial_users']} | "
-        f"{totals['trial_bounced']} | "
-        f"{totals['tariffs']['249']} | "
-        f"{totals['tariffs']['599']} | "
-        f"{totals['tariffs']['1799']}</code>"
+        f"{total_new_users} | "
+        f"{last_day_stats['trial_users']} | "
+        f"{last_day_stats['trial_bounced']} | "
+        f"{last_day_tariffs['249']} | "
+        f"{last_day_tariffs['599']} | "
+        f"{last_day_tariffs['1799']}</code>"
     )
     daily_lines.append("")
     daily_lines.append(
