@@ -21,6 +21,7 @@ from sqlalchemy import and_
 from sqlalchemy import func
 from sqlalchemy import or_
 from sqlalchemy import select
+from sqlalchemy.orm import aliased
 
 from handlers.broadcast_states import BroadcastStates
 from utils.config import Config
@@ -28,6 +29,7 @@ from filters.is_admin import IsAdmin
 
 from common.models.db import User
 from common.models.db import EventLog
+from common.models.db import ReferralBonus
 from common.models.db import YkPayment
 from common.models.db import UserTrafficProgress
 from common.models.db import YkRecurrentPayment
@@ -529,6 +531,394 @@ def generate_table_report_messages(
         "\n".join(daily_lines),
         "\n".join(source_lines),
     ]
+
+
+def format_admin_user(user: User | None) -> str:
+    if user is None:
+        return "unknown"
+
+    username = f"@{escape(user.username)}" if user.username else "@unknown"
+    return f"<code>{user.telegram_id}</code> ({username})"
+
+
+@service_router.message(F.text.startswith("/ref-report"), IsAdmin())
+async def __on_referral_report_requested(
+    message: Message,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    args = message.text.split()[1:] if message.text else []
+
+    if len(args) < 2:
+        await message.answer(
+            "❌ Неверный формат команды.\n"
+            "Используйте: <code>/ref-report 01.05.2026 07.05.2026</code>"
+        )
+        return
+
+    try:
+        start_date = parse_report_date(args[0])
+        end_date = parse_report_date(args[1])
+
+        if start_date > end_date:
+            await message.answer("❌ Начальная дата не может быть больше конечной даты")
+            return
+    except ValueError:
+        await message.answer(
+            "❌ Неверный формат даты. Используйте формат DD.MM.YYYY"
+        )
+        return
+
+    processing_msg = await message.answer("🔄 Собираем отчет по рефералке...")
+
+    try:
+        async with tx(session_maker) as session:
+            report_data = await get_referral_report_data(
+                session=session,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+        await processing_msg.delete()
+
+        for report_message in generate_referral_report_messages(
+            report_data=report_data,
+            start_date=start_date,
+            end_date=end_date,
+        ):
+            await message.answer(text=report_message)
+            await asyncio.sleep(0.5)
+    except Exception as e:
+        await processing_msg.delete()
+        await message.answer(f"❌ Ошибка при формировании отчета: {str(e)}")
+        logging.exception("Error generating referral report")
+
+
+async def get_referral_report_data(session, start_date: date, end_date: date) -> dict:
+    start_datetime = datetime.combine(start_date, time.min)
+    end_datetime = datetime.combine(end_date, time.max)
+    referral_user = aliased(User)
+    referrer_user = aliased(User)
+
+    referrals_query = (
+        select(referral_user, referrer_user, EventLog.timestamp)
+        .join(EventLog, EventLog.user_id == referral_user.id)
+        .join(referrer_user, referral_user.referred_by_id == referrer_user.id)
+        .where(
+            and_(
+                EventLog.event_type == "subscription_created",
+                EventLog.timestamp >= start_datetime,
+                EventLog.timestamp <= end_datetime,
+                referral_user.referred_by_id.is_not(None),
+            )
+        )
+        .order_by(EventLog.timestamp.asc())
+    )
+    referrals_result = await session.execute(referrals_query)
+    referrals = referrals_result.all()
+
+    referral_ids = {referral.id for referral, _, _ in referrals}
+    referrer_ids = {referrer.id for _, referrer, _ in referrals}
+
+    paid_referral_ids = set()
+    if referral_ids:
+        payments_result = await session.execute(
+            select(YkPayment.user_id)
+            .where(
+                and_(
+                    YkPayment.status == "succeeded",
+                    YkPayment.user_id.in_(referral_ids),
+                )
+            )
+            .distinct()
+        )
+        paid_referral_ids = set(payments_result.scalars().all())
+
+    bonus_days_by_referrer = defaultdict(int)
+    if referrer_ids and referral_ids:
+        bonuses_result = await session.execute(
+            select(
+                ReferralBonus.referrer_id,
+                func.coalesce(func.sum(ReferralBonus.days_added), 0),
+            )
+            .where(
+                and_(
+                    ReferralBonus.referrer_id.in_(referrer_ids),
+                    ReferralBonus.referral_id.in_(referral_ids),
+                )
+            )
+            .group_by(ReferralBonus.referrer_id)
+        )
+        for referrer_id, bonus_days in bonuses_result.all():
+            bonus_days_by_referrer[referrer_id] = bonus_days or 0
+
+    referrers = {}
+    seen_referral_ids = set()
+    for referral, referrer, created_at in referrals:
+        if referral.id in seen_referral_ids:
+            continue
+        seen_referral_ids.add(referral.id)
+
+        if referrer.id not in referrers:
+            referrers[referrer.id] = {
+                "user": referrer,
+                "invited": 0,
+                "paid": 0,
+                "bonus_days": 0,
+                "last_invite_at": created_at,
+            }
+
+        referrer_stats = referrers[referrer.id]
+        referrer_stats["invited"] += 1
+        referrer_stats["bonus_days"] = bonus_days_by_referrer[referrer.id]
+        referrer_stats["last_invite_at"] = max(
+            referrer_stats["last_invite_at"],
+            created_at,
+        )
+
+        if referral.id in paid_referral_ids:
+            referrer_stats["paid"] += 1
+
+    referrer_rows = sorted(
+        referrers.values(),
+        key=lambda row: (row["invited"], row["paid"]),
+        reverse=True,
+    )
+
+    return {
+        "invited_count": len(referral_ids),
+        "paid_count": len(paid_referral_ids),
+        "referrer_rows": referrer_rows,
+    }
+
+
+def generate_referral_report_messages(
+    report_data: dict,
+    start_date: date,
+    end_date: date,
+) -> list[str]:
+    invited_count = report_data["invited_count"]
+    paid_count = report_data["paid_count"]
+    referrer_rows = report_data["referrer_rows"]
+    conversion = (paid_count / invited_count * 100) if invited_count else 0
+
+    lines = [
+        f"🤝 <b>РЕФЕРАЛКА ЗА ПЕРИОД {start_date:%d.%m.%Y}-{end_date:%d.%m.%Y}</b>",
+        "",
+        f"Всего приглашено: <b>{invited_count}</b>",
+        f"Перешли на платный: <b>{paid_count}</b>",
+        f"Конверсия в оплату: <b>{conversion:.1f}%</b>",
+        "",
+        "<b>Топ приглашающих:</b>",
+    ]
+
+    if not referrer_rows:
+        lines.append("<i>За период приглашений не найдено</i>")
+        return ["\n".join(lines)]
+
+    for index, row in enumerate(referrer_rows[:20], 1):
+        user = row["user"]
+        lines.append(
+            f"{index}. {format_admin_user(user)} | "
+            f"пригласил {row['invited']} | "
+            f"оплатили {row['paid']} | "
+            f"бонус {row['bonus_days']} дн."
+        )
+
+    if len(referrer_rows) > 20:
+        lines.append(f"\n<i>Показаны первые 20 из {len(referrer_rows)}.</i>")
+
+    return split_message("\n".join(lines))
+
+
+@service_router.message(F.text.startswith("/refs"), IsAdmin())
+async def __on_user_referrals_requested(
+    message: Message,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    args = message.text.split()[1:] if message.text else []
+
+    if not args:
+        await message.answer(
+            "❌ Введите Telegram ID пользователя.\n"
+            "Пример: <code>/refs 123456789</code>"
+        )
+        return
+
+    try:
+        target_tg_id = int(args[0])
+    except ValueError:
+        await message.answer("❌ Telegram ID должен быть числом.")
+        return
+
+    processing_msg = await message.answer("🔄 Собираем список приглашенных...")
+
+    try:
+        async with tx(session_maker) as session:
+            report_data = await get_user_referrals_data(
+                session=session,
+                target_tg_id=target_tg_id,
+            )
+
+        await processing_msg.delete()
+
+        for report_message in generate_user_referrals_messages(report_data):
+            await message.answer(text=report_message)
+            await asyncio.sleep(0.5)
+    except Exception as e:
+        await processing_msg.delete()
+        await message.answer(f"❌ Ошибка при формировании отчета: {str(e)}")
+        logging.exception("Error generating user referrals report")
+
+
+async def get_user_referrals_data(session, target_tg_id: int) -> dict:
+    referrer = await session.scalar(
+        select(User).where(User.telegram_id == target_tg_id)
+    )
+
+    if referrer is None:
+        return {
+            "referrer": None,
+            "referrals": [],
+            "paid_count": 0,
+            "bonus_days": 0,
+        }
+
+    referrals_result = await session.execute(
+        select(User)
+        .where(User.referred_by_id == referrer.id)
+        .order_by(User.id.asc())
+    )
+    referrals = referrals_result.scalars().all()
+    referral_ids = {referral.id for referral in referrals}
+
+    first_seen_by_user = {}
+    paid_by_user = defaultdict(lambda: {"count": 0, "sum": 0})
+    bonus_days_by_referral = defaultdict(int)
+
+    if referral_ids:
+        first_seen_result = await session.execute(
+            select(EventLog.user_id, func.min(EventLog.timestamp))
+            .where(
+                and_(
+                    EventLog.event_type == "subscription_created",
+                    EventLog.user_id.in_(referral_ids),
+                )
+            )
+            .group_by(EventLog.user_id)
+        )
+        first_seen_by_user = dict(first_seen_result.all())
+
+        payments_result = await session.execute(
+            select(
+                YkPayment.user_id,
+                func.count(YkPayment.id),
+                func.coalesce(func.sum(YkPayment.amount), 0),
+            )
+            .where(
+                and_(
+                    YkPayment.status == "succeeded",
+                    YkPayment.user_id.in_(referral_ids),
+                )
+            )
+            .group_by(YkPayment.user_id)
+        )
+        for user_id, payment_count, payment_sum in payments_result.all():
+            paid_by_user[user_id] = {
+                "count": payment_count or 0,
+                "sum": payment_sum or 0,
+            }
+
+        bonuses_result = await session.execute(
+            select(
+                ReferralBonus.referral_id,
+                func.coalesce(func.sum(ReferralBonus.days_added), 0),
+            )
+            .where(
+                and_(
+                    ReferralBonus.referrer_id == referrer.id,
+                    ReferralBonus.referral_id.in_(referral_ids),
+                )
+            )
+            .group_by(ReferralBonus.referral_id)
+        )
+        for referral_id, bonus_days in bonuses_result.all():
+            bonus_days_by_referral[referral_id] = bonus_days or 0
+
+    referral_rows = []
+    for referral in referrals:
+        payments = paid_by_user[referral.id]
+        referral_rows.append(
+            {
+                "user": referral,
+                "first_seen": first_seen_by_user.get(referral.id),
+                "payments_count": payments["count"],
+                "payments_sum": payments["sum"],
+                "bonus_days": bonus_days_by_referral[referral.id],
+            }
+        )
+
+    referral_rows.sort(
+        key=lambda row: row["first_seen"] or datetime.min,
+        reverse=True,
+    )
+
+    return {
+        "referrer": referrer,
+        "referrals": referral_rows,
+        "paid_count": sum(1 for row in referral_rows if row["payments_count"] > 0),
+        "bonus_days": sum(row["bonus_days"] for row in referral_rows),
+    }
+
+
+def generate_user_referrals_messages(report_data: dict) -> list[str]:
+    referrer = report_data["referrer"]
+
+    if referrer is None:
+        return ["❌ Пользователь с таким Telegram ID не найден."]
+
+    referral_rows = report_data["referrals"]
+    paid_count = report_data["paid_count"]
+    bonus_days = report_data["bonus_days"]
+
+    lines = [
+        f"🤝 <b>ПРИГЛАШЕННЫЕ ПОЛЬЗОВАТЕЛИ</b>",
+        f"Кто приглашал: {format_admin_user(referrer)}",
+        "",
+        f"Всего приглашено: <b>{len(referral_rows)}</b>",
+        f"Перешли на платный: <b>{paid_count}</b>",
+        f"Начислено бонусов: <b>{bonus_days} дн.</b>",
+        "",
+    ]
+
+    if not referral_rows:
+        lines.append("<i>Этот пользователь пока никого не пригласил.</i>")
+        return ["\n".join(lines)]
+
+    lines.append("<b>Список приглашенных:</b>")
+
+    for index, row in enumerate(referral_rows[:30], 1):
+        referral = row["user"]
+        first_seen = row["first_seen"]
+        first_seen_text = (
+            first_seen.strftime("%d.%m.%Y") if first_seen else "нет даты"
+        )
+        paid_text = (
+            f"{row['payments_count']} оплат / {row['payments_sum']} ₽"
+            if row["payments_count"] > 0
+            else "нет оплат"
+        )
+
+        lines.append(
+            f"{index}. {format_admin_user(referral)} | "
+            f"{first_seen_text} | "
+            f"{paid_text} | "
+            f"бонус {row['bonus_days']} дн."
+        )
+
+    if len(referral_rows) > 30:
+        lines.append(f"\n<i>Показаны первые 30 из {len(referral_rows)}.</i>")
+
+    return split_message("\n".join(lines))
 
 
 @service_router.message(F.text.startswith("/statinterval"), IsAdmin())
