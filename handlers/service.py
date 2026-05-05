@@ -925,6 +925,7 @@ def generate_user_referrals_messages(report_data: dict) -> list[str]:
 @service_router.message(F.text.startswith("/statinterval"), IsAdmin())
 async def __on_stat_interval_requested(
     message: Message,
+    rwms_client: RwmsClient,
     session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
 ):
     # Парсим аргументы команды
@@ -964,7 +965,10 @@ async def __on_stat_interval_requested(
         async with tx(session_maker) as session:
             # Получаем статистику по подпискам и платежам
             subscription_stats = await get_subscription_payment_stats_by_interval(
-                session=session, start_date=start_date, end_date=end_date
+                session=session,
+                rwms_client=rwms_client,
+                start_date=start_date,
+                end_date=end_date,
             )
 
         # Формируем отчет (теперь возвращает список сообщений)
@@ -994,8 +998,75 @@ async def __on_stat_interval_requested(
         logging.exception("Error generating interval report")
 
 
+def rwms_user_has_connection(rw_user) -> bool:
+    """Returns whether Remnawave has evidence that the user actually used traffic."""
+    if rw_user.HasField("first_connected"):
+        return True
+
+    return (
+        getattr(rw_user, "used_traffic_bytes", 0) > 0
+        or getattr(rw_user, "lifetime_used_traffic_bytes", 0) > 0
+    )
+
+
+async def get_connected_user_ids_from_rwms(
+    rwms_client: RwmsClient,
+    username_to_user_id: dict[str, int],
+) -> set[int] | None:
+    if not username_to_user_id:
+        return set()
+
+    connected_user_ids = set()
+    offset = 0
+    page_size = 1000
+
+    try:
+        while True:
+            rwms_users = await rwms_client.get_all_users(offset=offset, count=page_size)
+            if rwms_users is None:
+                return None
+
+            for rw_user in rwms_users.users:
+                user_id = username_to_user_id.get(rw_user.username)
+                if user_id is not None and rwms_user_has_connection(rw_user):
+                    connected_user_ids.add(user_id)
+
+            users_count = len(rwms_users.users)
+            if users_count == 0:
+                break
+
+            offset += users_count
+            total = int(getattr(rwms_users, "total", 0) or 0)
+            if total > 0 and offset >= total:
+                break
+
+        return connected_user_ids
+    except Exception:
+        logging.exception("failed to collect connected users from RWMS")
+        return None
+
+
+async def get_connected_user_ids_from_events(session, user_ids: list[int]) -> set[int]:
+    if not user_ids:
+        return set()
+
+    connections_query = select(EventLog.user_id).where(
+        and_(
+            EventLog.event_type == "traffic_threshold_reached",
+            EventLog.user_id.in_(user_ids),
+            EventLog.event_payload["threshold"].astext.cast(Integer) == 0,
+        )
+    )
+
+    connections_result = await session.execute(connections_query)
+    return set(connections_result.scalars().all())
+
+
 async def get_subscription_payment_stats_by_interval(
-    session, start_date: datetime.date, end_date: datetime.date
+    session,
+    rwms_client: RwmsClient,
+    start_date: datetime.date,
+    end_date: datetime.date,
 ) -> dict:
     """Получает статистику по подпискам и платежам за указанный интервал"""
     from sqlalchemy import and_, func, select
@@ -1005,16 +1076,25 @@ async def get_subscription_payment_stats_by_interval(
     end_datetime = datetime.combine(end_date, time.max)
 
     # Получаем все события создания подписок за период
-    events_query = select(EventLog.user_id, EventLog.event_payload).where(
-        and_(
-            EventLog.event_type == "subscription_created",
-            EventLog.timestamp >= start_datetime,
-            EventLog.timestamp <= end_datetime,
+    events_query = (
+        select(EventLog.user_id, EventLog.event_payload, User.username)
+        .join(User, User.id == EventLog.user_id)
+        .where(
+            and_(
+                EventLog.event_type == "subscription_created",
+                EventLog.timestamp >= start_datetime,
+                EventLog.timestamp <= end_datetime,
+            )
         )
     )
 
     result = await session.execute(events_query)
     rows = result.all()
+    username_to_user_id = {row.username: row.user_id for row in rows if row.username}
+    connected_user_ids = await get_connected_user_ids_from_rwms(
+        rwms_client=rwms_client,
+        username_to_user_id=username_to_user_id,
+    )
 
     # Группируем user_id по traffic_source
     user_ids_by_traffic = {}
@@ -1063,16 +1143,15 @@ async def get_subscription_payment_stats_by_interval(
         unique_paying_users_result = await session.execute(unique_paying_users_query)
         unique_paying_users_count = unique_paying_users_result.scalar() or 0
 
-        connections_query = select(func.count(func.distinct(EventLog.user_id))).where(
-            and_(
-                EventLog.event_type == "traffic_threshold_reached",
-                EventLog.user_id.in_(users_list),
-                EventLog.event_payload["threshold"].astext.cast(Integer) == 0,
+        if connected_user_ids is None:
+            source_connected_user_ids = await get_connected_user_ids_from_events(
+                session=session,
+                user_ids=users_list,
             )
-        )
+        else:
+            source_connected_user_ids = users_set & connected_user_ids
 
-        connections_result = await session.execute(connections_query)
-        connections_count = connections_result.scalar() or 0
+        connections_count = len(source_connected_user_ids)
 
         # Считаем общее количество платежей
         total_payments = sum(count for _, count in payments_by_tariff)
