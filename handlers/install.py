@@ -20,6 +20,7 @@ from utils.translator import translator as ts
 from utils.sql_helpers import tx
 from utils.sql_helpers import add_event_log
 from utils.sql_helpers import save_user_in_db
+from utils.sql_helpers import update_user_telegram_username
 from utils.sql_helpers import get_user_by_telegram_id
 from utils.sql_helpers import add_user_to_traffic_progress
 from common.rwms_client import RwmsClient
@@ -39,6 +40,12 @@ async def _get_or_restore_user_for_install(
 
     async with tx(session_maker) as session:
         db_user = await get_user_by_telegram_id(session, telegram_id)
+        if db_user is not None:
+            await update_user_telegram_username(
+                session=session,
+                telegram_id=telegram_id,
+                telegram_username=query.from_user.username,
+            )
 
     rw_user = await rwms_client.get_user_by_username(username=username)
 
@@ -62,6 +69,7 @@ async def _get_or_restore_user_for_install(
             referrer_id=None,
             telegram_id=telegram_id,
             expire_at=expire_at,
+            telegram_username=query.from_user.username,
         )
         await add_user_to_traffic_progress(session=session, telegram_id=telegram_id)
 

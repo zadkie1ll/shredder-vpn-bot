@@ -42,6 +42,7 @@ from utils.sql_helpers import (
 )
 from utils.sql_helpers import add_event_log
 from utils.sql_helpers import save_user_in_db
+from utils.sql_helpers import update_user_telegram_username
 from utils.sql_helpers import update_user_ymid
 from utils.sql_helpers import get_user_by_username
 from utils.sql_helpers import get_user_by_telegram_id
@@ -155,6 +156,7 @@ async def __main_menu_button_clicked(
                         referrer_id=referrer.id if referrer else None,
                         telegram_id=message.from_user.id,
                         expire_at=expire_at,
+                        telegram_username=message.from_user.username,
                     )
 
                     await add_user_to_traffic_progress(
@@ -189,10 +191,17 @@ async def __main_menu_button_clicked(
                         referrer_id=None,
                         telegram_id=message.from_user.id,
                         expire_at=expire_at,
+                        telegram_username=message.from_user.username,
                     )
 
                     await add_user_to_traffic_progress(
                         session=session, telegram_id=message.from_user.id
+                    )
+                else:
+                    await update_user_telegram_username(
+                        session=session,
+                        telegram_id=message.from_user.id,
+                        telegram_username=message.from_user.username,
                     )
 
                 found_event, prev_traffic_source = (

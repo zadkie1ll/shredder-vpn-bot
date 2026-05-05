@@ -537,7 +537,8 @@ def format_admin_user(user: User | None) -> str:
     if user is None:
         return "unknown"
 
-    username = f"@{escape(user.username)}" if user.username else "@unknown"
+    telegram_username = getattr(user, "telegram_username", None)
+    username = f"@{escape(telegram_username)}" if telegram_username else "@unknown"
     return f"<code>{user.telegram_id}</code> ({username})"
 
 
@@ -1505,7 +1506,7 @@ def generate_user_payments_report(
 
     report = f"👤 <b>ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ</b>\n"
     report += (
-        f"👤 Юзер: <code>{user.telegram_id}</code> (@{user.username or 'unknown'})\n"
+        f"👤 Юзер: {format_admin_user(user)}\n"
     )
 
     # Секция подписки
@@ -1625,7 +1626,7 @@ async def __on_top_payments_requested(
             line = (
                 f"{i}. <b>{ltv:,} ₽</b> — <code>{user.telegram_id}</code>\n"
                 f"   {t_icon} Использ. | {rec_status} Автоплат. | 💳 Чеков: {count}\n"
-                f"   👤 @{user.username or 'unknown'}\n"
+                f"   👤 {format_admin_user(user)}\n"
             ).replace(",", " ")
 
             report_lines.append(line)

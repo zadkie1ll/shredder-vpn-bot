@@ -51,11 +51,13 @@ async def save_user_in_db(
     referrer_id: Optional[int],
     telegram_id: Optional[int],
     expire_at: Optional[datetime],
+    telegram_username: Optional[str] = None,
 ) -> User:
     query = text("""
         INSERT INTO users (
             telegram_id,
             username,
+            telegram_username,
             referred_by_id,
             referral_type,
             autopay_allow,
@@ -63,18 +65,23 @@ async def save_user_in_db(
         ) VALUES (
             :telegram_id,
             :username,
+            :telegram_username,
             :referred_by_id,
             :referral_type,
             :autopay_allow,
             (:expire_at)::timestamp
         )
-        ON CONFLICT (telegram_id) DO UPDATE SET username = :username, expire_at = (:expire_at)::timestamp
+        ON CONFLICT (telegram_id) DO UPDATE SET
+            username = :username,
+            telegram_username = :telegram_username,
+            expire_at = (:expire_at)::timestamp
         RETURNING *
     """)
 
     logging.info(
         f"Saving user in DB with telegram_id={telegram_id}, "
-        f"username={username}, referrer_id={referrer_id}, expire_at={expire_at}"
+        f"username={username}, telegram_username={telegram_username}, "
+        f"referrer_id={referrer_id}, expire_at={expire_at}"
     )
 
     result = await session.execute(
@@ -83,6 +90,7 @@ async def save_user_in_db(
             "telegram_id": telegram_id,
             "expire_at": expire_at,
             "username": username,
+            "telegram_username": telegram_username,
             "referred_by_id": referrer_id,
             "referral_type": ReferralType.STANDARD if referrer_id is not None else None,
             "autopay_allow": True,
@@ -99,6 +107,16 @@ async def save_user_in_db(
 
     # Эта ситуация маловероятна из-за INSERT/UPDATE, но на всякий случай
     raise ValueError("User was not created or updated")
+
+
+async def update_user_telegram_username(
+    session: AsyncSession, telegram_id: int, telegram_username: Optional[str]
+) -> None:
+    await session.execute(
+        update(User)
+        .where(User.telegram_id == telegram_id)
+        .values(telegram_username=telegram_username)
+    )
 
 
 async def add_user_to_traffic_progress(session: AsyncSession, telegram_id: int) -> None:
