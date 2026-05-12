@@ -78,6 +78,17 @@ async def __block_adult_websites_question_clicked(
     )
 
 
+# Кнопка "Техническая поддержка" в разделе "Вопросы"
+@questions_router.callback_query(F.data.startswith(ts.get("ru", "SUPPORT_BUTTON")))
+@log_function_name
+@send_typing_action
+async def __support_question_clicked(query: CallbackQuery):
+    await query.message.edit_text(
+        text=ts.get("ru", "SUPPORT_ANSWER"),
+        reply_markup=markups.BACK_TO_QUESTIONS_INLINE_KEYBOARD.as_markup(),
+    )
+
+
 # Кнопка "Назад" в разделе "Вопросы"
 @questions_router.callback_query(
     F.data.startswith(buttons.BACK_TO_QUESTIONS_BUTTON_DATA)

@@ -183,6 +183,9 @@ BLOCK_ADULT_WEBSITES_ANSWER: |
   Скопируйте ключ, нажав на него, затем вставьте его в приложение Happ.
   Когда под названием подписки увидите надпись <b>«РОДИТЕЛЬСКИЙ КОНТРОЛЬ 🤱🏼»</b>, значит, всё настроено верно.
 
+SUPPORT_ANSWER: |
+  По всем вопросам напишите в техническую поддержку: @ShredderSUPPORT
+
 INSTALL_ON_ANDROID_INSTRUCTION: |
   Для подключения:
 
@@ -423,6 +426,7 @@ NO_WL_BUTTON: "У меня нет белых списков"
 VPN_DOESNT_WORK_BUTTON: "Нет интернета при подключении"
 CANCEL_SUBSCRIPTION_BUTTON: "Отменить подписку"
 BLOCK_ADULT_WEBSITES_BUTTON: "Блокировка сайтов для взрослых"
+SUPPORT_BUTTON: "Техническая поддержка"
 
 SAVE_RECURRENT_PAYMENT_BUTTON: Да, давайте сохраним! 👌
 CANCEL_RECURRENT_PAYMENT_BUTTON: Понимаю, хочу отменить
