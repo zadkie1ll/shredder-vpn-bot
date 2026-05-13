@@ -80,9 +80,12 @@ def create_payment_sync(
 
 
 async def create_payment(
-    shop_id: str, secret: str, tariff: Tariff, database_user: User
+    shop_id: str, secret: str, tariff: Tariff, database_user: User | None
 ) -> str:
     """Асинхронная версия создания платежа"""
+
+    if database_user is None:
+        raise ValueError("cannot create YooKassa payment without database user")
 
     loop = asyncio.get_event_loop()
 

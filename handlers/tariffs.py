@@ -77,6 +77,7 @@ async def __three_days_promo_tariff_button_clicked(
                 f"create invoice error: not found user by telegram id {query.from_user.id}"
             )
             await bot.send_message(query.from_user.id, ts.get("ru", "SOMETHING_WRONG"))
+            return
 
         tariff = TrialPromotionTariff()
 
@@ -147,6 +148,7 @@ async def __one_day_tariff_button_clicked(
                 f"create invoice error: not found user by telegram id {query.from_user.id}"
             )
             await bot.send_message(query.from_user.id, ts.get("ru", "SOMETHING_WRONG"))
+            return
 
         tariff = OneDayTariff()
 
@@ -214,6 +216,7 @@ async def __one_month_tariff_button_clicked(
                 f"create invoice error: not found user by telegram id {query.from_user.id}"
             )
             await bot.send_message(query.from_user.id, ts.get("ru", "SOMETHING_WRONG"))
+            return
 
         tariff = OneMonthTariff()
 
@@ -284,6 +287,7 @@ async def __three_months_tariff_button_clicked(
                 f"create invoice error: not found user by telegram id {query.from_user.id}"
             )
             await bot.send_message(query.from_user.id, ts.get("ru", "SOMETHING_WRONG"))
+            return
 
         tariff = ThreeMonthsTariff()
 
@@ -354,6 +358,7 @@ async def __six_months_tariff_button_clicked(
                 f"create invoice error: not found user by telegram id {query.from_user.id}"
             )
             await bot.send_message(query.from_user.id, ts.get("ru", "SOMETHING_WRONG"))
+            return
 
         tariff = SixMonthsTariff()
 
@@ -426,6 +431,7 @@ async def __one_year_tariff_button_clicked(
                 f"create invoice error: not found user by telegram id {query.from_user.id}"
             )
             await bot.send_message(query.from_user.id, ts.get("ru", "SOMETHING_WRONG"))
+            return
 
         confirmation_url = await payments.create_payment(
             config.shop_id,
