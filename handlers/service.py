@@ -464,50 +464,7 @@ def generate_table_report_messages(
     end_date: date,
     trial_period_days: int,
 ) -> list[str]:
-    daily_stats = report_data["daily_stats"]
     source_rows = report_data["source_rows"]
-
-    daily_lines = [
-        f"📋 <b>ТАБЛИЦА ЗА ПЕРИОД {start_date:%d.%m.%Y}-{end_date:%d.%m.%Y}</b>",
-        "",
-        "<code>Дата | Всего | На пробном | Отскочили | 249 | 599 | 1799",
-    ]
-
-    total_new_users = 0
-
-    for current_date in iter_report_dates(start_date, end_date):
-        day_stats = daily_stats[current_date]
-        tariff_stats = day_stats["tariffs"]
-
-        daily_lines.append(
-            f"{current_date:%d.%m.%Y} | "
-            f"{day_stats['new_users']} | "
-            f"{day_stats['trial_users']} | "
-            f"{day_stats['trial_bounced']} | "
-            f"{tariff_stats['249']} | "
-            f"{tariff_stats['599']} | "
-            f"{tariff_stats['1799']}"
-        )
-
-        total_new_users += day_stats["new_users"]
-
-    last_day_stats = daily_stats[end_date]
-    last_day_tariffs = last_day_stats["tariffs"]
-
-    daily_lines.append(
-        f"Итог | "
-        f"{total_new_users} | "
-        f"{last_day_stats['trial_users']} | "
-        f"{last_day_stats['trial_bounced']} | "
-        f"{last_day_tariffs['249']} | "
-        f"{last_day_tariffs['599']} | "
-        f"{last_day_tariffs['1799']}</code>"
-    )
-    daily_lines.append("")
-    daily_lines.append(
-        f"<i>Пробный период считается как {trial_period_days} дн. от даты /start. "
-        "Платные тарифы считаются по успешным платежам в дату платежа.</i>"
-    )
 
     source_lines = [
         f"📣 <b>ИСТОЧНИКИ ЗА ПЕРИОД {start_date:%d.%m.%Y}-{end_date:%d.%m.%Y}</b>",
@@ -527,10 +484,7 @@ def generate_table_report_messages(
 
     source_lines[-1] = f"{source_lines[-1]}</code>"
 
-    return [
-        "\n".join(daily_lines),
-        "\n".join(source_lines),
-    ]
+    return ["\n".join(source_lines)]
 
 
 def format_admin_user(user: User | None) -> str:
