@@ -1208,8 +1208,6 @@ async def generate_interval_report(
 
     lines = [
         f"📊 <b>СТАТИСТИКА ПО ДНЯМ {start_date:%d.%m.%Y}-{end_date:%d.%m.%Y}</b>",
-        "",
-        "<code>Дата | Зашло | Подкл. | Оплатили | Не продлили | 1д | 3д | 1м | 3м | 1г | Сумма",
     ]
 
     for current_date in iter_report_dates(start_date, end_date):
@@ -1224,17 +1222,22 @@ async def generate_interval_report(
             for _, tariff_name in INTERVAL_REPORT_TARIFF_COLUMNS
         ]
 
-        lines.append(
-            f"{current_date:%d.%m.%Y} | "
-            f"{entered} | "
-            f"{connected} | "
-            f"{paid_users} | "
-            f"{not_renewed} | "
-            f"{' | '.join(str(count) for count in tariff_counts)} | "
-            f"{payments_sum}"
+        lines.extend(
+            [
+                "",
+                f"<b>{current_date:%d.%m.%Y}</b>",
+                f"- Зашло: <b>{entered}</b>",
+                f"- Подключилось: <b>{connected}</b>",
+                f"- Оплатили: <b>{paid_users}</b>",
+                f"- Не продлили: <b>{not_renewed}</b>",
+                "- Оплаты по тарифам:",
+            ]
         )
-
-    lines[-1] = f"{lines[-1]}</code>"
+        for (tariff_label, _), tariff_count in zip(
+            INTERVAL_REPORT_TARIFF_COLUMNS, tariff_counts
+        ):
+            lines.append(f"  - {tariff_label}: <b>{tariff_count}</b>")
+        lines.append(f"- Сумма оплат: <b>{payments_sum} ₽</b>")
 
     lines.extend(
         [
