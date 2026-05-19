@@ -1215,6 +1215,7 @@ async def generate_interval_report(
         entered = len(day_stats["entered_bot_user_ids"])
         connected = len(day_stats["connected_user_ids"])
         paid_users = len(day_stats["paid_user_ids"])
+        payments_count = day_stats["payments_count"]
         payments_sum = day_stats["payments_sum"]
         not_renewed = len(day_stats["not_renewed_user_ids"])
         tariff_counts = [
@@ -1228,7 +1229,8 @@ async def generate_interval_report(
                 f"<b>{current_date:%d.%m.%Y}</b>",
                 f"- Зашло: <b>{entered}</b>",
                 f"- Подключилось: <b>{connected}</b>",
-                f"- Оплатили: <b>{paid_users}</b>",
+                f"- Оплатили пользователей: <b>{paid_users}</b>",
+                f"- Платежей: <b>{payments_count}</b>",
                 f"- Не продлили: <b>{not_renewed}</b>",
                 "- Оплаты по тарифам:",
             ]
