@@ -1141,17 +1141,17 @@ async def get_subscription_payment_stats_by_interval(
 
     payment_after_expiration = aliased(YkPayment)
     not_renewed_query = (
-        select(EventLog.user_id, EventLog.timestamp)
+        select(User.id, User.expire_at)
         .where(
             and_(
-                EventLog.event_type == "subscription_expired",
-                EventLog.timestamp >= start_datetime,
-                EventLog.timestamp <= end_datetime,
+                User.expire_at.isnot(None),
+                User.expire_at >= start_datetime,
+                User.expire_at <= end_datetime,
                 ~exists().where(
                     and_(
-                        payment_after_expiration.user_id == EventLog.user_id,
+                        payment_after_expiration.user_id == User.id,
                         payment_after_expiration.status == "succeeded",
-                        payment_after_expiration.created_at > EventLog.timestamp,
+                        payment_after_expiration.created_at > User.expire_at,
                     )
                 ),
             )
@@ -1159,8 +1159,8 @@ async def get_subscription_payment_stats_by_interval(
     )
 
     not_renewed_result = await session.execute(not_renewed_query)
-    for user_id, timestamp in not_renewed_result.all():
-        daily_stats[timestamp.date()]["not_renewed_user_ids"].add(user_id)
+    for user_id, expire_at in not_renewed_result.all():
+        daily_stats[expire_at.date()]["not_renewed_user_ids"].add(user_id)
 
     return daily_stats
 
