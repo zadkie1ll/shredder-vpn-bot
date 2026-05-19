@@ -1239,17 +1239,6 @@ async def generate_interval_report(
             lines.append(f"  - {tariff_label}: <b>{tariff_count}</b>")
         lines.append(f"- Сумма оплат: <b>{payments_sum} ₽</b>")
 
-    lines.extend(
-        [
-            "",
-            "<i>Зашло = новые пользователи с событием subscription_created. "
-            "Подкл. = первое достижение порога traffic_threshold_reached:0. "
-            "Оплатили = уникальные пользователи с успешной оплатой в эту дату. "
-            "Колонки 1д-1г = успешные платежи по каждому тарифу в эту дату. "
-            "Не продлили = subscription_expired без успешной оплаты после истечения.</i>",
-        ]
-    )
-
     return split_message("\n".join(lines))
 
 
