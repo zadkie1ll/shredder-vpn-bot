@@ -226,13 +226,6 @@ async def __process_broadcast_confirm(
     await call.message.answer(f"✅ Рассылка завершена! Получили: {count} чел.")
 
 
-TABLE_REPORT_TARIFFS = {
-    "month": "249",
-    "threemonths": "599",
-    "year": "1799",
-}
-
-
 def parse_report_date(value: str) -> date:
     """Парсит дату отчета в формате DD.MM.YYYY."""
     return datetime.strptime(value, "%d.%m.%Y").date()
@@ -358,8 +351,6 @@ async def get_table_report_data(
     payments_query = (
         select(
             YkPayment.user_id,
-            YkPayment.subscription_period,
-            YkPayment.created_at,
         )
         .where(
             and_(
@@ -378,18 +369,6 @@ async def get_table_report_data(
         for traffic_source in traffic_sources_result.scalars().all()
     }
 
-    daily_stats = {
-        current_date: {
-            "new_users": 0,
-            "trial_users": 0,
-            "trial_bounced": 0,
-            "tariffs": {
-                tariff_price: 0 for tariff_price in TABLE_REPORT_TARIFFS.values()
-            },
-        }
-        for current_date in iter_report_dates(start_date, end_date)
-    }
-
     users = {}
     source_stats = defaultdict(lambda: {"new_users": 0, "paid_users": set()})
 
@@ -402,43 +381,14 @@ async def get_table_report_data(
 
         created_date = row.timestamp.date()
         if start_date <= created_date <= end_date:
-            daily_stats[created_date]["new_users"] += 1
             source_stats[traffic_source]["new_users"] += 1
 
-    payments_by_user = defaultdict(list)
     for payment in payments:
-        payments_by_user[payment.user_id].append(payment)
-
-        payment_date = payment.created_at.date()
-        if start_date <= payment_date <= end_date:
-            tariff_price = TABLE_REPORT_TARIFFS.get(payment.subscription_period)
-            if tariff_price is not None:
-                daily_stats[payment_date]["tariffs"][tariff_price] += 1
-
-            user_info = users.get(payment.user_id)
-            if user_info is not None and payment.user_id in report_user_ids:
-                source_stats[user_info["traffic_source"]]["paid_users"].add(
-                    payment.user_id
-                )
-
-    for user_id, user_info in users.items():
-        created_at = user_info["created_at"]
-        trial_ends_at = created_at + timedelta(days=trial_period_days)
-        user_payments = payments_by_user.get(user_id, [])
-
-        for current_date in iter_report_dates(start_date, end_date):
-            current_day_end = datetime.combine(current_date, time.max)
-
-            has_paid_by_day_end = any(
-                payment.created_at <= current_day_end for payment in user_payments
+        user_info = users.get(payment.user_id)
+        if user_info is not None and payment.user_id in report_user_ids:
+            source_stats[user_info["traffic_source"]]["paid_users"].add(
+                payment.user_id
             )
-
-            if created_at.date() <= current_date < trial_ends_at.date():
-                if not has_paid_by_day_end:
-                    daily_stats[current_date]["trial_users"] += 1
-
-            if trial_ends_at.date() == current_date and not has_paid_by_day_end:
-                daily_stats[current_date]["trial_bounced"] += 1
 
     source_rows = []
     for traffic_source, stats in source_stats.items():
@@ -452,10 +402,121 @@ async def get_table_report_data(
 
     source_rows.sort(key=lambda row: row["new_users"], reverse=True)
 
+    daily_stats = await get_daily_table_report_stats_by_interval(
+        session=session,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
     return {
         "daily_stats": daily_stats,
         "source_rows": source_rows,
     }
+
+
+async def get_daily_table_report_stats_by_interval(
+    session,
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> dict:
+    """Gets the daily stats block used as the first part of table-report."""
+    from sqlalchemy import exists
+
+    start_datetime = datetime.combine(start_date, time.min)
+    end_datetime = datetime.combine(end_date, time.max)
+
+    daily_stats = {
+        current_date: {
+            "entered_bot_user_ids": set(),
+            "connected_user_ids": set(),
+            "paid_user_ids": set(),
+            "payments_count": 0,
+            "payments_sum": 0,
+            "tariff_stats": defaultdict(int),
+            "not_renewed_user_ids": set(),
+        }
+        for current_date in iter_report_dates(start_date, end_date)
+    }
+
+    created_events_query = (
+        select(EventLog.user_id, EventLog.timestamp)
+        .where(
+            and_(
+                EventLog.event_type == "subscription_created",
+                EventLog.timestamp >= start_datetime,
+                EventLog.timestamp <= end_datetime,
+            )
+        )
+    )
+
+    created_events_result = await session.execute(created_events_query)
+    for user_id, timestamp in created_events_result.all():
+        daily_stats[timestamp.date()]["entered_bot_user_ids"].add(user_id)
+
+    connected_events_query = (
+        select(EventLog.user_id, EventLog.timestamp)
+        .where(
+            and_(
+                EventLog.event_type == "traffic_threshold_reached",
+                EventLog.timestamp >= start_datetime,
+                EventLog.timestamp <= end_datetime,
+                EventLog.event_payload["threshold"].astext.cast(Integer) == 0,
+            )
+        )
+    )
+
+    connected_events_result = await session.execute(connected_events_query)
+    for user_id, timestamp in connected_events_result.all():
+        daily_stats[timestamp.date()]["connected_user_ids"].add(user_id)
+
+    payments_query = (
+        select(
+            YkPayment.user_id,
+            YkPayment.amount,
+            YkPayment.subscription_period,
+            YkPayment.created_at,
+        )
+        .where(
+            and_(
+                YkPayment.status == "succeeded",
+                YkPayment.created_at >= start_datetime,
+                YkPayment.created_at <= end_datetime,
+            )
+        )
+    )
+
+    payments_result = await session.execute(payments_query)
+    for user_id, amount, subscription_period, created_at in payments_result.all():
+        day_stats = daily_stats[created_at.date()]
+        day_stats["paid_user_ids"].add(user_id)
+        day_stats["payments_count"] += 1
+        day_stats["payments_sum"] += amount or 0
+        day_stats["tariff_stats"][get_tariff_display_name(subscription_period)] += 1
+
+    payment_after_expiration = aliased(YkPayment)
+    not_renewed_query = (
+        select(User.id, User.expire_at)
+        .where(
+            and_(
+                User.expire_at.isnot(None),
+                User.expire_at >= start_datetime,
+                User.expire_at <= end_datetime,
+                ~exists().where(
+                    and_(
+                        payment_after_expiration.user_id == User.id,
+                        payment_after_expiration.status == "succeeded",
+                        payment_after_expiration.created_at > User.expire_at,
+                    )
+                ),
+            )
+        )
+    )
+
+    not_renewed_result = await session.execute(not_renewed_query)
+    for user_id, expire_at in not_renewed_result.all():
+        daily_stats[expire_at.date()]["not_renewed_user_ids"].add(user_id)
+
+    return daily_stats
 
 
 def generate_table_report_messages(
@@ -464,6 +525,7 @@ def generate_table_report_messages(
     end_date: date,
     trial_period_days: int,
 ) -> list[str]:
+    daily_stats = report_data["daily_stats"]
     source_rows = report_data["source_rows"]
 
     source_lines = [
@@ -484,7 +546,9 @@ def generate_table_report_messages(
 
     source_lines[-1] = f"{source_lines[-1]}</code>"
 
-    return ["\n".join(source_lines)]
+    return split_message(
+        generate_daily_table_report(daily_stats, start_date, end_date)
+    ) + ["\n".join(source_lines)]
 
 
 def format_admin_user(user: User | None) -> str:
@@ -879,6 +943,7 @@ def generate_user_referrals_messages(report_data: dict) -> list[str]:
 @service_router.message(F.text.startswith("/statinterval"), IsAdmin())
 async def __on_stat_interval_requested(
     message: Message,
+    rwms_client: RwmsClient,
     session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
 ):
     # Парсим аргументы команды
@@ -919,6 +984,7 @@ async def __on_stat_interval_requested(
             # Получаем статистику по подпискам и платежам
             subscription_stats = await get_subscription_payment_stats_by_interval(
                 session=session,
+                rwms_client=rwms_client,
                 start_date=start_date,
                 end_date=end_date,
             )
@@ -1016,30 +1082,18 @@ async def get_connected_user_ids_from_events(session, user_ids: list[int]) -> se
 
 async def get_subscription_payment_stats_by_interval(
     session,
+    rwms_client: RwmsClient,
     start_date: datetime.date,
     end_date: datetime.date,
 ) -> dict:
-    """Получает дневную статистику событий за указанный интервал."""
-    from sqlalchemy import exists
+    """Получает статистику по подпискам и платежам за указанный интервал"""
 
     start_datetime = datetime.combine(start_date, time.min)
     end_datetime = datetime.combine(end_date, time.max)
 
-    daily_stats = {
-        current_date: {
-            "entered_bot_user_ids": set(),
-            "connected_user_ids": set(),
-            "paid_user_ids": set(),
-            "payments_count": 0,
-            "payments_sum": 0,
-            "tariff_stats": defaultdict(int),
-            "not_renewed_user_ids": set(),
-        }
-        for current_date in iter_report_dates(start_date, end_date)
-    }
-
-    created_events_query = (
-        select(EventLog.user_id, EventLog.timestamp)
+    events_query = (
+        select(EventLog.user_id, EventLog.event_payload, User.username)
+        .join(User, User.id == EventLog.user_id)
         .where(
             and_(
                 EventLog.event_type == "subscription_created",
@@ -1049,74 +1103,102 @@ async def get_subscription_payment_stats_by_interval(
         )
     )
 
-    created_events_result = await session.execute(created_events_query)
-    for user_id, timestamp in created_events_result.all():
-        daily_stats[timestamp.date()]["entered_bot_user_ids"].add(user_id)
-
-    connected_events_query = (
-        select(EventLog.user_id, EventLog.timestamp)
-        .where(
-            and_(
-                EventLog.event_type == "traffic_threshold_reached",
-                EventLog.timestamp >= start_datetime,
-                EventLog.timestamp <= end_datetime,
-                EventLog.event_payload["threshold"].astext.cast(Integer) == 0,
-            )
-        )
+    result = await session.execute(events_query)
+    rows = result.all()
+    username_to_user_id = {row.username: row.user_id for row in rows if row.username}
+    connected_user_ids = await get_connected_user_ids_from_rwms(
+        rwms_client=rwms_client,
+        username_to_user_id=username_to_user_id,
     )
 
-    connected_events_result = await session.execute(connected_events_query)
-    for user_id, timestamp in connected_events_result.all():
-        daily_stats[timestamp.date()]["connected_user_ids"].add(user_id)
+    user_ids_by_traffic = {}
+    for row in rows:
+        user_id = row.user_id
+        payload = row.event_payload
+        traffic_source = payload.get("traffic_source")
 
-    payments_query = (
-        select(
-            YkPayment.user_id,
-            YkPayment.amount,
-            YkPayment.subscription_period,
-            YkPayment.created_at,
+        if traffic_source not in user_ids_by_traffic:
+            user_ids_by_traffic[traffic_source] = set()
+
+        user_ids_by_traffic[traffic_source].add(user_id)
+
+    stat = {}
+
+    for traffic_source, users_set in user_ids_by_traffic.items():
+        if not users_set:
+            continue
+
+        users_list = list(users_set)
+
+        payments_query = (
+            select(
+                YkPayment.subscription_period, func.count(YkPayment.id).label("count")
+            )
+            .where(
+                and_(
+                    YkPayment.status == "succeeded",
+                    YkPayment.user_id.in_(users_list),
+                )
+            )
+            .group_by(YkPayment.subscription_period)
         )
-        .where(
+
+        payments_result = await session.execute(payments_query)
+        payments_by_tariff = payments_result.all()
+
+        unique_paying_users_query = select(
+            func.count(func.distinct(YkPayment.user_id))
+        ).where(
             and_(
                 YkPayment.status == "succeeded",
-                YkPayment.created_at >= start_datetime,
-                YkPayment.created_at <= end_datetime,
+                YkPayment.user_id.in_(users_list),
             )
         )
-    )
 
-    payments_result = await session.execute(payments_query)
-    for user_id, amount, subscription_period, created_at in payments_result.all():
-        day_stats = daily_stats[created_at.date()]
-        day_stats["paid_user_ids"].add(user_id)
-        day_stats["payments_count"] += 1
-        day_stats["payments_sum"] += amount or 0
-        day_stats["tariff_stats"][get_tariff_display_name(subscription_period)] += 1
+        unique_paying_users_result = await session.execute(unique_paying_users_query)
+        unique_paying_users_count = unique_paying_users_result.scalar() or 0
 
-    payment_after_expiration = aliased(YkPayment)
-    not_renewed_query = (
-        select(User.id, User.expire_at)
-        .where(
-            and_(
-                User.expire_at.isnot(None),
-                User.expire_at >= start_datetime,
-                User.expire_at <= end_datetime,
-                ~exists().where(
-                    and_(
-                        payment_after_expiration.user_id == User.id,
-                        payment_after_expiration.status == "succeeded",
-                        payment_after_expiration.created_at > User.expire_at,
-                    )
-                ),
+        if connected_user_ids is None:
+            source_connected_user_ids = await get_connected_user_ids_from_events(
+                session=session,
+                user_ids=users_list,
             )
+        else:
+            source_connected_user_ids = users_set & connected_user_ids
+
+        connections_count = len(source_connected_user_ids)
+        total_payments = sum(count for _, count in payments_by_tariff)
+
+        tariff_stats = {}
+        for tariff_id, count in payments_by_tariff:
+            tariff_name = get_tariff_display_name(tariff_id)
+            tariff_stats[tariff_name] = count
+
+        sub_created_count = len(users_set)
+
+        payments_conversion_rate = (
+            (unique_paying_users_count / sub_created_count * 100)
+            if sub_created_count > 0
+            else 0
         )
-    )
 
-    not_renewed_result = await session.execute(not_renewed_query)
-    for user_id, expire_at in not_renewed_result.all():
-        daily_stats[expire_at.date()]["not_renewed_user_ids"].add(user_id)
+        connections_conversion_rate = (
+            (connections_count / sub_created_count * 100)
+            if sub_created_count > 0
+            else 0
+        )
 
-    return daily_stats
+        stat[traffic_source] = {
+            "subscriptions_created": sub_created_count,
+            "successful_payments": total_payments,
+            "payments_conversion_rate": payments_conversion_rate,
+            "connections_conversion_rate": connections_conversion_rate,
+            "tariff_stats": tariff_stats,
+            "unique_paying_users": unique_paying_users_count,
+            "connections": connections_count,
+        }
+
+    return stat
 
 
 def get_tariff_display_name(tariff_id: str) -> str:
@@ -1155,9 +1237,9 @@ INTERVAL_REPORT_TARIFF_COLUMNS = [
 ]
 
 
-async def generate_interval_report(
+def generate_daily_table_report(
     subscription_stats: dict, start_date: datetime.date, end_date: datetime.date
-) -> list[str]:
+) -> str:
     """Генерирует дневной отчет за интервал дат."""
 
     lines = [
@@ -1195,7 +1277,162 @@ async def generate_interval_report(
             lines.append(f"  - {tariff_label}: <b>{tariff_count}</b>")
         lines.append(f"- Сумма оплат: <b>{payments_sum} ₽</b>")
 
-    return split_message("\n".join(lines))
+    return "\n".join(lines)
+
+
+async def generate_interval_report(
+    subscription_stats: dict, start_date: datetime.date, end_date: datetime.date
+) -> list[str]:
+    """Генерирует отчет за интервал дат, возвращает список сообщений"""
+
+    messages = []
+
+    report_part1 = f"📊 ОТЧЕТ ЗА ПЕРИОД: {start_date} - {end_date}\n\n"
+    report_part1 += "💰 СТАТИСТИКА ПО ПОДПИСКАМ И ПЛАТЕЖАМ:\n\n"
+
+    total_connections = 0
+    total_subscriptions = 0
+    total_payments = 0
+    total_unique_paying_users = 0
+    total_tariff_stats = {}
+
+    sorted_stats = sorted(
+        subscription_stats.items(),
+        key=lambda x: x[1]["subscriptions_created"],
+        reverse=True,
+    )
+
+    for traffic_source, stats in sorted_stats:
+        ts_display = "Direct" if traffic_source is None else f"TS_{traffic_source}"
+        subscriptions = stats["subscriptions_created"]
+        payments = stats["successful_payments"]
+        payments_conversion = stats["payments_conversion_rate"]
+        connections_conversion = stats["connections_conversion_rate"]
+        tariff_stats = stats.get("tariff_stats", {})
+        unique_paying_users = stats["unique_paying_users"]
+        connections_count = stats["connections"]
+
+        report_part1 += f"🔹 {ts_display}:\n"
+        report_part1 += f"   👥 Подписок: {subscriptions}\n"
+        report_part1 += f"   🔌 Подключений: {connections_count}\n"
+        report_part1 += f"   🎫 Покупателей: {unique_paying_users}\n"
+        report_part1 += f"   💰 Платежей: {payments}\n"
+
+        if tariff_stats:
+            for tariff_name, count in tariff_stats.items():
+                report_part1 += f"             {tariff_name}: {count}\n"
+                total_tariff_stats[tariff_name] = (
+                    total_tariff_stats.get(tariff_name, 0) + count
+                )
+
+        report_part1 += (
+            f"   📈 Конверсия в подключения: {connections_conversion:.1f}%\n"
+        )
+        report_part1 += f"   📈 Конверсия в продажи: {payments_conversion:.1f}%\n\n"
+
+        total_connections += connections_count
+        total_subscriptions += subscriptions
+        total_payments += payments
+        total_unique_paying_users += unique_paying_users
+
+    total_payments_conversion = (
+        (total_unique_paying_users / total_subscriptions * 100)
+        if total_subscriptions > 0
+        else 0
+    )
+
+    total_connections_conversion = (
+        (total_connections / total_subscriptions * 100)
+        if total_subscriptions > 0
+        else 0
+    )
+
+    report_part1 += f"📊 ОБЩИЕ ИТОГИ:\n"
+    report_part1 += f"   👥 Всего подписок: {total_subscriptions}\n"
+    report_part1 += f"   🔌 Всего подключений: {total_connections}\n"
+    report_part1 += f"   🎫 Всего покупателей: {total_unique_paying_users}\n"
+    report_part1 += f"   💰 Всего платежей: {total_payments}\n"
+
+    if total_tariff_stats:
+        sorted_total_tariffs = sorted(
+            total_tariff_stats.items(), key=lambda x: get_tariff_order(x[0])
+        )
+        for tariff_name, count in sorted_total_tariffs:
+            report_part1 += f"             {tariff_name}: {count}\n"
+
+    report_part1 += (
+        f"   📈 Общая конверсия в подключения: {total_connections_conversion:.1f}%\n"
+    )
+    report_part1 += (
+        f"   📈 Общая конверсия в продажи: {total_payments_conversion:.1f}%\n"
+    )
+
+    messages.append(report_part1)
+
+    if len(sorted_stats) > 1:
+        report_part2 = f"📈 АНАЛИТИКА ПО ИСТОЧНИКАМ ({start_date} - {end_date}):\n\n"
+
+        sources_with_conversion = [
+            (ts, stats)
+            for ts, stats in sorted_stats
+            if stats["subscriptions_created"] > 0
+        ]
+
+        if sources_with_conversion:
+            best_source = max(
+                sources_with_conversion, key=lambda x: x[1]["payments_conversion_rate"]
+            )
+            best_ts_display = (
+                "Direct" if best_source[0] is None else f"TS_{best_source[0]}"
+            )
+
+            sources_with_positive_conversion = [
+                s
+                for s in sources_with_conversion
+                if s[1]["payments_conversion_rate"] > 0
+            ]
+            if len(sources_with_positive_conversion) > 1:
+                worst_source = min(
+                    sources_with_positive_conversion,
+                    key=lambda x: x[1]["payments_conversion_rate"],
+                )
+            else:
+                worst_source = best_source
+
+            worst_ts_display = (
+                "Direct" if worst_source[0] is None else f"TS_{worst_source[0]}"
+            )
+
+            report_part2 += f"🏆 Лучшая конверсия:\n"
+            report_part2 += f"   {best_ts_display} - {best_source[1]['payments_conversion_rate']:.1f}%\n"
+            report_part2 += f"   ({best_source[1]['subscriptions_created']} подписок, {best_source[1]['unique_paying_users']} покупателей)\n\n"
+
+            if best_source != worst_source:
+                report_part2 += f"📉 Худшая конверсия:\n"
+                report_part2 += f"   {worst_ts_display} - {worst_source[1]['payments_conversion_rate']:.1f}%\n"
+                report_part2 += f"   ({worst_source[1]['subscriptions_created']} подписок, {worst_source[1]['unique_paying_users']} покупателей)\n\n"
+
+        report_part2 += "💡 РЕКОМЕНДАЦИИ:\n"
+
+        if total_payments_conversion < 10:
+            report_part2 += "• Низкая конверсия - стоит улучшить онбординг\n"
+        elif total_payments_conversion > 30:
+            report_part2 += "• Отличная конверсия! Продолжайте в том же духе\n"
+
+        zero_conversion_sources = [
+            ts
+            for ts, stats in sorted_stats
+            if stats["subscriptions_created"] > 0
+            and stats["payments_conversion_rate"] == 0
+        ]
+        if zero_conversion_sources:
+            report_part2 += (
+                f"• {len(zero_conversion_sources)} источников без конверсии - нужен анализ\n"
+            )
+
+        messages.append(report_part2)
+
+    return messages
 
 
 def split_message(text: str, max_length: int = 4096) -> list[str]:
