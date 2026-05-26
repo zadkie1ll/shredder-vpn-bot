@@ -122,6 +122,24 @@ async def get_feedback_audience(
     return list(result.scalars().all())
 
 
+async def get_users_by_telegram_ids(
+    session: AsyncSession,
+    telegram_ids: list[int],
+) -> list[User]:
+    if not telegram_ids:
+        return []
+
+    result = await session.execute(
+        select(User).where(User.telegram_id.in_(telegram_ids))
+    )
+    users_by_telegram_id = {user.telegram_id: user for user in result.scalars().all()}
+    return [
+        users_by_telegram_id[telegram_id]
+        for telegram_id in telegram_ids
+        if telegram_id in users_by_telegram_id
+    ]
+
+
 async def create_recipient(
     session: AsyncSession,
     *,

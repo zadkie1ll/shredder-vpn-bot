@@ -110,6 +110,15 @@ def discounted_price(option: dict) -> int:
     return max(1, tariff.price - discount_amount)
 
 
+async def preview_feedback_audience(
+    *,
+    session_maker: async_sessionmaker,
+    limit: int,
+) -> list[User]:
+    async with tx(session_maker) as session:
+        return await repo.get_feedback_audience(session, limit)
+
+
 async def start_feedback_test(
     *,
     bot: Bot,
@@ -180,6 +189,54 @@ async def start_feedback_send(
             run_mode=FeedbackRunMode.NEAREST_EXPIRING,
             created_by_telegram_id=admin_telegram_id,
             user_limit=limit,
+        )
+        recipients = []
+        for user in users:
+            recipients.append(
+                await repo.create_recipient(
+                    session,
+                    campaign_id=campaign.id,
+                    run_id=run.id,
+                    user=user,
+                )
+            )
+
+    sent, failed = await send_feedback_to_recipients(
+        bot=bot,
+        session_maker=session_maker,
+        campaign=campaign,
+        recipients=recipients,
+    )
+
+    async with tx(session_maker) as session:
+        await repo.finish_run(session, run.id)
+
+    return FeedbackSendResult(run.id, len(recipients), sent, failed)
+
+
+async def start_feedback_send_for_telegram_ids(
+    *,
+    bot: Bot,
+    session_maker: async_sessionmaker,
+    admin_telegram_id: int,
+    telegram_ids: list[int],
+    survey_type: FeedbackSurveyType,
+    reward_options: list[dict],
+    min_text_length: int | None,
+) -> FeedbackSendResult:
+    async with tx(session_maker) as session:
+        users = await repo.get_users_by_telegram_ids(session, telegram_ids)
+        campaign, run = await repo.create_campaign_with_run(
+            session,
+            title="Trial feedback",
+            survey_type=survey_type,
+            min_text_length=min_text_length,
+            message_text_key=survey_type.value,
+            button_options=texts.SURVEY_BUTTON_OPTIONS,
+            reward_options=reward_options,
+            run_mode=FeedbackRunMode.NEAREST_EXPIRING,
+            created_by_telegram_id=admin_telegram_id,
+            user_limit=len(telegram_ids),
         )
         recipients = []
         for user in users:

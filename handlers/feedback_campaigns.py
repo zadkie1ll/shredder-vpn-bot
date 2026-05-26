@@ -4,12 +4,15 @@ import sqlalchemy
 from aiogram import F
 from aiogram import Bot
 from aiogram import Router
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 from aiogram.types import Message
 from aiogram.exceptions import TelegramForbiddenError
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import utils.payments as payments
 from filters.is_admin import IsAdmin
+from handlers.feedback_states import FeedbackBroadcastStates
 from repositories import feedback_campaigns as repo
 from services import feedback_campaigns as feedback_service
 from texts import feedback_campaigns as feedback_texts
@@ -20,6 +23,7 @@ from utils.sql_helpers import tx
 from common.models.tariff import str_to_tariff
 
 feedback_campaigns_router = Router()
+FEEDBACK_PREVIEW_CHUNK_SIZE = 120
 
 
 def parse_min_text_length(args: list[str], index: int, survey_type) -> int | None:
@@ -34,6 +38,33 @@ def parse_min_text_length(args: list[str], index: int, survey_type) -> int | Non
     if value < 1:
         raise ValueError("min_chars must be positive")
     return value
+
+
+async def send_feedback_audience_preview(
+    message: Message,
+    telegram_ids: list[int],
+) -> None:
+    if not telegram_ids:
+        await message.answer("В аудиторию feedback-рассылки никто не попал.")
+        return
+
+    for start in range(0, len(telegram_ids), FEEDBACK_PREVIEW_CHUNK_SIZE):
+        chunk = telegram_ids[start : start + FEEDBACK_PREVIEW_CHUNK_SIZE]
+        lines = [
+            f"{index}. <code>{telegram_id}</code>"
+            for index, telegram_id in enumerate(chunk, start + 1)
+        ]
+        await message.answer(
+            "TG ID, которые попадут в feedback-рассылку:\n" + "\n".join(lines)
+        )
+
+
+def build_feedback_confirm_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Подтвердить отправку", callback_data="fb_send_confirm")
+    builder.button(text="Отмена", callback_data="fb_send_cancel")
+    builder.adjust(1)
+    return builder.as_markup()
 
 
 @feedback_campaigns_router.message(F.text.startswith("/feedback_test"), IsAdmin())
@@ -80,6 +111,7 @@ async def on_feedback_test(
 async def on_feedback_send(
     message: Message,
     bot: Bot,
+    state: FSMContext,
     session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
 ):
     args = message.text.split()[1:] if message.text else []
@@ -97,27 +129,77 @@ async def on_feedback_send(
         reward_options = feedback_service.parse_reward_options(args[2])
         min_text_length = parse_min_text_length(args, 3, survey_type)
 
-        await message.answer("Запускаю feedback-рассылку...")
-        result = await feedback_service.start_feedback_send(
-            bot=bot,
+        users = await feedback_service.preview_feedback_audience(
             session_maker=session_maker,
-            admin_telegram_id=message.from_user.id,
             limit=limit,
-            survey_type=survey_type,
+        )
+        telegram_ids = [user.telegram_id for user in users]
+        await send_feedback_audience_preview(message, telegram_ids)
+        if not telegram_ids:
+            return
+
+        await state.set_state(FeedbackBroadcastStates.confirm)
+        await state.update_data(
+            telegram_ids=telegram_ids,
+            survey_type=survey_type.value,
             reward_options=reward_options,
             min_text_length=min_text_length,
         )
         await message.answer(
-            f"Feedback-рассылка завершена.\n"
-            f"run_id: <code>{result.run_id}</code>\n"
-            f"Выбрано: {result.selected_count}, отправлено: {result.sent_count}, "
-            f"ошибок: {result.failed_count}"
+            f"Перед отправкой проверь список выше.\n"
+            f"Всего получателей: <b>{len(telegram_ids)}</b>.\n"
+            f"Запустить feedback-рассылку?",
+            reply_markup=build_feedback_confirm_keyboard(),
         )
     except ValueError as exc:
         await message.answer(f"Ошибка: {exc}")
     except Exception as exc:
         logging.exception("feedback_send failed: %s", exc)
         await message.answer("Не получилось запустить feedback-рассылку.")
+
+
+@feedback_campaigns_router.callback_query(
+    FeedbackBroadcastStates.confirm,
+    F.data.in_({"fb_send_confirm", "fb_send_cancel"}),
+    IsAdmin(),
+)
+async def on_feedback_send_confirm(
+    query: CallbackQuery,
+    bot: Bot,
+    state: FSMContext,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    if query.data == "fb_send_cancel":
+        await state.clear()
+        await query.message.edit_text("Feedback-рассылка отменена.")
+        await query.answer()
+        return
+
+    data = await state.get_data()
+    await state.clear()
+    await query.message.edit_text("Запускаю feedback-рассылку...")
+
+    try:
+        result = await feedback_service.start_feedback_send_for_telegram_ids(
+            bot=bot,
+            session_maker=session_maker,
+            admin_telegram_id=query.from_user.id,
+            telegram_ids=data["telegram_ids"],
+            survey_type=feedback_service.parse_survey_type(data["survey_type"]),
+            reward_options=data["reward_options"],
+            min_text_length=data.get("min_text_length"),
+        )
+        await query.message.answer(
+            f"Feedback-рассылка завершена.\n"
+            f"run_id: <code>{result.run_id}</code>\n"
+            f"Выбрано: {result.selected_count}, отправлено: {result.sent_count}, "
+            f"ошибок: {result.failed_count}"
+        )
+        await query.answer("Рассылка запущена")
+    except Exception as exc:
+        logging.exception("feedback_send confirm failed: %s", exc)
+        await query.message.answer("Не получилось отправить feedback-рассылку.")
+        await query.answer("Ошибка отправки", show_alert=True)
 
 
 @feedback_campaigns_router.callback_query(F.data.startswith("fb_answer:"))
