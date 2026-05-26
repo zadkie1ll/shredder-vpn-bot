@@ -79,6 +79,63 @@ def create_payment_sync(
     return payment.confirmation.confirmation_url
 
 
+def create_discount_payment_sync(
+    shop_id: str,
+    secret: str,
+    tariff: Tariff,
+    amount: int,
+    username: str,
+    telegram_id: int,
+    feedback_reward_code: str,
+) -> str:
+    Configuration.account_id = shop_id
+    Configuration.secret_key = secret
+    payment_description = build_payment_description(tariff)
+
+    payment = Payment.create(
+        {
+            "save_payment_method": True,
+            "amount": {"value": amount, "currency": "RUB"},
+            "confirmation": {
+                "type": "redirect",
+                "return_url": TELEGRAM_BOT_URL,
+            },
+            "metadata": {
+                "username": username,
+                "telegram_id": telegram_id,
+                "subscription_period": tariff.db_tariff_id,
+                "autopay": False,
+                "trial_promotion": False,
+                "from_trial": False,
+                "feedback_reward_code": feedback_reward_code,
+            },
+            "capture": True,
+            "description": payment_description,
+            "receipt": {
+                "customer": {
+                    "email": RECEIPT_EMAIL,
+                },
+                "items": [
+                    {
+                        "description": payment_description,
+                        "quantity": "1.00",
+                        "amount": {
+                            "value": f"{amount:.2f}",
+                            "currency": "RUB",
+                        },
+                        "vat_code": 1,
+                        "payment_mode": "full_payment",
+                        "payment_subject": "service",
+                        "measure": "piece",
+                    }
+                ],
+            },
+        }
+    )
+
+    return payment.confirmation.confirmation_url
+
+
 async def create_payment(
     shop_id: str, secret: str, tariff: Tariff, database_user: User | None
 ) -> str:
@@ -113,5 +170,45 @@ async def create_payment(
     except Exception as e:
         logging.error(
             f"error creating YooKassa payment for user {database_user.username}: {e}"
+        )
+        raise
+
+
+async def create_discount_payment(
+    shop_id: str,
+    secret: str,
+    tariff: Tariff,
+    amount: int,
+    database_user: User | None,
+    feedback_reward_code: str,
+) -> str:
+    if database_user is None:
+        raise ValueError("cannot create YooKassa payment without database user")
+
+    loop = asyncio.get_event_loop()
+
+    try:
+        sync_func = partial(
+            create_discount_payment_sync,
+            shop_id=shop_id,
+            secret=secret,
+            tariff=tariff,
+            amount=amount,
+            username=database_user.username,
+            telegram_id=database_user.telegram_id,
+            feedback_reward_code=feedback_reward_code,
+        )
+
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, sync_func), timeout=15.0
+        )
+    except asyncio.TimeoutError:
+        logging.error(
+            f"timeout creating discounted YooKassa payment for user {database_user.username}"
+        )
+        raise
+    except Exception as e:
+        logging.error(
+            f"error creating discounted YooKassa payment for user {database_user.username}: {e}"
         )
         raise

@@ -1,0 +1,53 @@
+from common.models.tariff import str_to_tariff
+from common.models.tariff import tariff_to_human_str
+
+DEFAULT_DISCOUNT_PERCENT = 30
+DEFAULT_MIN_TEXT_LENGTH = 60
+DEFAULT_REWARD_EXPIRES_DAYS = 14
+
+SURVEY_BUTTON_OPTIONS = [
+    {"value": 1, "text": "Не устроила цена"},
+    {"value": 2, "text": "Не разобрался с подключением"},
+    {"value": 3, "text": "Не хватило скорости"},
+    {"value": 4, "text": "Не было нужной локации"},
+    {"value": 5, "text": "Другая причина"},
+]
+
+SURVEY_MESSAGES = {
+    "buttons": (
+        "[ЗАГЛУШКА] Feedback-опрос Shredder VPN.\n\n"
+        "Выбери один из вариантов ответа. После ответа бот покажет тестовую скидку."
+    ),
+    "text": (
+        "[ЗАГЛУШКА] Feedback-опрос Shredder VPN.\n\n"
+        "Напиши тестовый текст ответа. После валидного ответа бот покажет тестовую скидку."
+    ),
+}
+
+TEXT_TOO_SHORT = (
+    "Спасибо! Ответ пока коротковат: нужно минимум {min_length} символов, "
+    "сейчас {actual_length}. Напиши чуть подробнее, пожалуйста."
+)
+
+REWARD_ISSUED = "[ЗАГЛУШКА] Ответ сохранён. Выбери тестовый тариф со скидкой:"
+
+NO_PENDING_TEXT_SURVEY = "Нет активного текстового опроса."
+PAYMENT_WITH_DISCOUNT = (
+    "Тариф {period}: {price}₽ вместо {original_price}₽ (-{discount_percent}%).\n{url}"
+)
+
+
+def reward_button_text(option: dict) -> str:
+    tariff = str_to_tariff(option["subscription_period"])
+    original_price = tariff.price
+    discount_percent = option.get("discount_percent") or 0
+    discount_amount = option.get("discount_amount") or 0
+
+    if discount_percent:
+        price = round(original_price * (100 - discount_percent) / 100)
+        discount_label = f"-{discount_percent}%"
+    else:
+        price = max(1, original_price - discount_amount)
+        discount_label = f"-{discount_amount}₽"
+
+    return f"{tariff_to_human_str(tariff)} - {price}₽ ({discount_label})"
