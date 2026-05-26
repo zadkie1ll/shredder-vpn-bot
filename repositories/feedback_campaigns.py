@@ -103,6 +103,20 @@ async def get_feedback_audience(
             UserTrafficProgress.passed_0.is_(True),
         )
     )
+    already_sent_feedback_exists = exists().where(
+        and_(
+            FeedbackCampaignRecipient.user_id == User.id,
+            FeedbackCampaignRecipient.status.in_(
+                [
+                    FeedbackRecipientStatus.SENT,
+                    FeedbackRecipientStatus.ANSWERED,
+                    FeedbackRecipientStatus.REWARDED,
+                ]
+            ),
+            FeedbackCampaignRecipient.run_id == FeedbackCampaignRun.id,
+            FeedbackCampaignRun.run_mode == FeedbackRunMode.NEAREST_EXPIRING,
+        )
+    )
 
     result = await session.execute(
         select(User)
@@ -114,6 +128,7 @@ async def get_feedback_audience(
                 subscription_created_exists,
                 connected_exists,
                 not_(paid_payment_exists),
+                not_(already_sent_feedback_exists),
             )
         )
         .order_by(User.expire_at.desc())
@@ -218,6 +233,40 @@ async def cancel_run(session: AsyncSession, run_id: int) -> bool:
         )
     )
     return result.rowcount > 0
+
+
+async def cleanup_old_production_recipients(
+    session: AsyncSession,
+    older_than_days: int,
+) -> int:
+    cutoff = datetime.utcnow() - timedelta(days=older_than_days)
+    production_run_ids = (
+        select(FeedbackCampaignRun.id)
+        .where(FeedbackCampaignRun.run_mode == FeedbackRunMode.NEAREST_EXPIRING)
+        .scalar_subquery()
+    )
+
+    result = await session.execute(
+        update(FeedbackCampaignRecipient)
+        .where(
+            and_(
+                FeedbackCampaignRecipient.run_id.in_(production_run_ids),
+                FeedbackCampaignRecipient.created_at <= cutoff,
+                FeedbackCampaignRecipient.status.in_(
+                    [
+                        FeedbackRecipientStatus.SENT,
+                        FeedbackRecipientStatus.ANSWERED,
+                        FeedbackRecipientStatus.REWARDED,
+                    ]
+                ),
+            )
+        )
+        .values(
+            status=FeedbackRecipientStatus.SKIPPED,
+            error=f"cleaned up after {older_than_days} days",
+        )
+    )
+    return result.rowcount or 0
 
 
 async def get_run_counts(session: AsyncSession, run_id: int) -> dict[str, int]:

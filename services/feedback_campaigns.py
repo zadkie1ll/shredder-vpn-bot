@@ -119,6 +119,15 @@ async def preview_feedback_audience(
         return await repo.get_feedback_audience(session, limit)
 
 
+async def cleanup_old_production_recipients(
+    *,
+    session_maker: async_sessionmaker,
+    older_than_days: int,
+) -> int:
+    async with tx(session_maker) as session:
+        return await repo.cleanup_old_production_recipients(session, older_than_days)
+
+
 async def start_feedback_test(
     *,
     bot: Bot,

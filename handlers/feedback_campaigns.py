@@ -372,3 +372,34 @@ async def on_feedback_cancel(
             await message.answer("Такой run_id не найден.")
     except ValueError:
         await message.answer("run_id должен быть числом")
+
+
+@feedback_campaigns_router.message(F.text.startswith("/feedback_cleanup"), IsAdmin())
+async def on_feedback_cleanup(
+    message: Message,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    args = message.text.split()[1:] if message.text else []
+    if not args:
+        await message.answer("Формат: /feedback_cleanup <older_than_days>")
+        return
+
+    try:
+        older_than_days = int(args[0])
+        if older_than_days < 1:
+            raise ValueError("older_than_days must be positive")
+
+        cleaned_count = await feedback_service.cleanup_old_production_recipients(
+            session_maker=session_maker,
+            older_than_days=older_than_days,
+        )
+        await message.answer(
+            f"Очищено получателей feedback-рассылок старше "
+            f"{older_than_days} дней: <b>{cleaned_count}</b>.\n"
+            f"Эти пользователи снова доступны для продовой feedback-рассылки."
+        )
+    except ValueError as exc:
+        await message.answer(f"Ошибка: {exc}")
+    except Exception as exc:
+        logging.exception("feedback cleanup failed: %s", exc)
+        await message.answer("Не получилось очистить старых получателей.")
