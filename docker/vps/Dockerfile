@@ -25,6 +25,9 @@ COPY common ./common
 COPY locales ./locales
 COPY proto ./proto
 COPY handlers ./handlers
+COPY repositories ./repositories
+COPY services ./services
+COPY texts ./texts
 COPY filters ./filters
 COPY middlewares ./middlewares
 COPY utils ./utils
