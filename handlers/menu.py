@@ -54,6 +54,7 @@ from common.rwms_client import RwmsClient
 from common.models.messages import ConversionEvent
 
 menu_router = Router()
+OLD_QUESTIONS_BUTTON = "Вопросы"
 
 
 def __get_welcome_message(
@@ -429,7 +430,8 @@ async def __my_profile_button_clicked(
         await message.answer(ts.get("ru", "SOMETHING_WRONG"))
 
 
-# Кнопка "Вопросы"
+# Кнопка "Поддержка"
+@menu_router.message(F.text.startswith(OLD_QUESTIONS_BUTTON))
 @menu_router.message(F.text.startswith(ts.get("ru", "QUESTIONS_BUTTON")))
 @log_function_name
 @send_typing_action
@@ -444,6 +446,14 @@ async def __questions_button_clicked(
 
         event = analytics_event.ShowQuestionsClicked()
         db_user = await send_analytics_event(session_maker, message.from_user.id, event)
+
+        if message.text and message.text.startswith(OLD_QUESTIONS_BUTTON):
+            await message.answer(
+                "Меню обновлено",
+                reply_markup=markups.MAIN_MENU_REPLY_KEYBOARD.as_markup(
+                    resize_keyboard=True
+                ),
+            )
 
         await send_conversion_event(
             config=config,
