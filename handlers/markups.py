@@ -124,14 +124,10 @@ QUESTIONS_INLINE_KEYBOARD.button(
     callback_data=ts.get("ru", "CANCEL_SUBSCRIPTION_BUTTON"),
 )
 QUESTIONS_INLINE_KEYBOARD.button(
-    text=ts.get("ru", "BLOCK_ADULT_WEBSITES_BUTTON"),
-    callback_data=ts.get("ru", "BLOCK_ADULT_WEBSITES_BUTTON"),
-)
-QUESTIONS_INLINE_KEYBOARD.button(
     text=ts.get("ru", "SUPPORT_BUTTON"),
     callback_data=ts.get("ru", "SUPPORT_BUTTON"),
 )
-QUESTIONS_INLINE_KEYBOARD.adjust(1, 1, 1, 1, 1)
+QUESTIONS_INLINE_KEYBOARD.adjust(1, 1, 1, 1)
 
 
 BACK_TO_QUESTIONS_INLINE_KEYBOARD = InlineKeyboardBuilder()
