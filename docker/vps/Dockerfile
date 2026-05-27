@@ -1,19 +1,20 @@
 ARG PYTHON_VERSION=3.12
-FROM python:$PYTHON_VERSION-slim as builder
+ARG DEBIAN_RELEASE=bookworm
+FROM python:$PYTHON_VERSION-slim-$DEBIAN_RELEASE as builder
 
 ENV container="docker"
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt update && apt upgrade -y && \
-    apt install -y --no-install-recommends \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
         git \
         make \
         libssl-dev \
         pkg-config \
         build-essential \
         python3-dev \
-        libpq-dev && \
-    rm -rf /var/lib/apt/lists/*
+        libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory.
 WORKDIR /app
@@ -37,7 +38,8 @@ RUN python3 -m pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
     rm -rf /root/.cache/pip
 
-FROM python:$PYTHON_VERSION-slim
+FROM python:$PYTHON_VERSION-slim-$DEBIAN_RELEASE
+ARG PYTHON_VERSION
 WORKDIR /app
 
 ENV PYTHON_LIB_PATH=/usr/local/lib/python${PYTHON_VERSION%.*}/site-packages
@@ -48,6 +50,8 @@ COPY --from=builder /app /app
 RUN mv /app/locales/vps/*.yml /app/locales/ && rm -rf /app/locales/vps && rm -rf /app/locales/vpn
 
 # install ca-certificates to allow curl verify ssl certificates of a remote hosts
-RUN apt update && apt install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 CMD ["python3", "/app/main.py"]
