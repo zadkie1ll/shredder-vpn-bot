@@ -2,8 +2,13 @@ from common.models.tariff import str_to_tariff
 from common.models.tariff import tariff_to_human_str
 
 DEFAULT_DISCOUNT_PERCENT = 30
+MIN_DISCOUNT_PERCENT = 1
+MAX_DISCOUNT_PERCENT = 95
 DEFAULT_MIN_TEXT_LENGTH = 60
 DEFAULT_REWARD_EXPIRES_DAYS = 14
+CONNECTION_PROBLEM_BUTTON_VALUE = 2
+MISSING_LOCATION_BUTTON_VALUE = 4
+OTHER_REASON_BUTTON_VALUE = 5
 
 SURVEY_BUTTON_OPTIONS = [
     {"value": 1, "text": "Не устроила цена"},
@@ -33,6 +38,19 @@ TEXT_TOO_SHORT = (
     "сейчас {actual_length}. Напиши чуть подробнее, пожалуйста."
 )
 
+MISSING_LOCATION_PROMPT = (
+    "Спасибо! Напиши, пожалуйста, какой страны тебе не хватило. "
+    "После ответа бот покажет тарифы со скидкой."
+)
+OTHER_REASON_PROMPT = (
+    "Спасибо! Напиши, пожалуйста, что именно нам нужно улучшить. "
+    "После ответа бот покажет тарифы со скидкой."
+)
+CONNECTION_SUPPORT_NOTE = (
+    "Если проблема с подключением все еще актуальна, напиши в поддержку:\n"
+    "{support_text}\n\n"
+    "А скидку за ответ мы все равно уже подготовили."
+)
 REWARD_ISSUED = "Спасибо за честный ответ! Выбери тариф со скидкой:"
 
 NO_PENDING_TEXT_SURVEY = "Нет активного текстового опроса."

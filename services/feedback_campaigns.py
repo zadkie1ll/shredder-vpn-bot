@@ -31,26 +31,51 @@ class FeedbackSendResult:
 
 
 def parse_reward_options(value: str) -> list[dict]:
-    periods = []
-    for raw_period in value.split(","):
-        period = raw_period.strip().lower()
-        if not period:
+    reward_options = []
+    seen_periods = set()
+    for raw_option in value.split(","):
+        option = raw_option.strip().lower()
+        if not option:
             continue
+
+        raw_period, separator, raw_discount_percent = option.partition(":")
+        period = raw_period.strip()
         if period not in ALLOWED_REWARD_PERIODS:
             raise ValueError("allowed reward periods: month,sixmonths,year")
-        if period not in periods:
-            periods.append(period)
+        if period in seen_periods:
+            raise ValueError(f"duplicate reward period: {period}")
 
-    if not periods:
+        discount_percent = texts.DEFAULT_DISCOUNT_PERCENT
+        if separator:
+            if not raw_discount_percent:
+                raise ValueError(f"discount percent is required for {period}")
+            try:
+                discount_percent = int(raw_discount_percent)
+            except ValueError as exc:
+                raise ValueError("discount percent must be an integer") from exc
+            if not (
+                texts.MIN_DISCOUNT_PERCENT
+                <= discount_percent
+                <= texts.MAX_DISCOUNT_PERCENT
+            ):
+                raise ValueError(
+                    "discount percent must be between "
+                    f"{texts.MIN_DISCOUNT_PERCENT} and "
+                    f"{texts.MAX_DISCOUNT_PERCENT}"
+                )
+
+        seen_periods.add(period)
+        reward_options.append(
+            {
+                "subscription_period": period,
+                "discount_percent": discount_percent,
+            }
+        )
+
+    if not reward_options:
         raise ValueError("at least one reward period is required")
 
-    return [
-        {
-            "subscription_period": period,
-            "discount_percent": texts.DEFAULT_DISCOUNT_PERCENT,
-        }
-        for period in periods
-    ]
+    return reward_options
 
 
 def parse_survey_type(value: str) -> FeedbackSurveyType:
@@ -108,6 +133,13 @@ def discounted_price(option: dict) -> int:
     if discount_percent:
         return max(1, round(tariff.price * (100 - discount_percent) / 100))
     return max(1, tariff.price - discount_amount)
+
+
+def button_requires_text(button_value: int) -> bool:
+    return button_value in {
+        texts.MISSING_LOCATION_BUTTON_VALUE,
+        texts.OTHER_REASON_BUTTON_VALUE,
+    }
 
 
 async def preview_feedback_audience(
@@ -310,7 +342,7 @@ async def save_button_answer_and_issue_reward(
     telegram_id: int,
     recipient_id: int,
     button_value: int,
-) -> tuple[int, list[dict]]:
+) -> tuple[int, list[dict]] | tuple[None, None]:
     async with tx(session_maker) as session:
         context = await repo.get_recipient_with_campaign(session, recipient_id)
         if context is None:
@@ -331,6 +363,84 @@ async def save_button_answer_and_issue_reward(
             answer_type=FeedbackAnswerType.BUTTON,
             button_value=button_value,
         )
+        if button_requires_text(button_value):
+            return None, None
+
+        reward = await repo.issue_reward(
+            session,
+            campaign=campaign,
+            recipient=recipient,
+            expires_in=timedelta(days=texts.DEFAULT_REWARD_EXPIRES_DAYS),
+        )
+        return reward.id, reward.reward_options
+
+
+async def save_button_text_answer_and_issue_reward(
+    *,
+    session_maker: async_sessionmaker,
+    telegram_id: int,
+    recipient_id: int,
+    answer_text: str,
+) -> tuple[int, list[dict]]:
+    async with tx(session_maker) as session:
+        context = await repo.get_recipient_with_campaign(session, recipient_id)
+        if context is None:
+            raise ValueError("feedback recipient not found")
+        recipient, campaign = context
+        if recipient.telegram_id_snapshot != telegram_id:
+            raise ValueError("feedback recipient belongs to another user")
+        if campaign.survey_type != FeedbackSurveyType.BUTTONS:
+            raise ValueError("feedback campaign is not a button survey")
+
+        cleaned_answer_text = answer_text.strip()
+        if not cleaned_answer_text:
+            raise ValueError("Напиши ответ текстом, пожалуйста.")
+
+        answer_updated = await repo.update_answer_text(
+            session,
+            recipient_id=recipient.id,
+            text_value=cleaned_answer_text,
+        )
+        if not answer_updated:
+            raise ValueError("feedback answer not found")
+
+        reward = await repo.issue_reward(
+            session,
+            campaign=campaign,
+            recipient=recipient,
+            expires_in=timedelta(days=texts.DEFAULT_REWARD_EXPIRES_DAYS),
+        )
+        return reward.id, reward.reward_options
+
+
+async def save_pending_button_text_answer_and_issue_reward(
+    *,
+    session_maker: async_sessionmaker,
+    telegram_id: int,
+    answer_text: str,
+) -> tuple[int, list[dict]] | tuple[None, None]:
+    async with tx(session_maker) as session:
+        context = await repo.find_pending_button_text_recipient(
+            session,
+            telegram_id,
+            [texts.MISSING_LOCATION_BUTTON_VALUE, texts.OTHER_REASON_BUTTON_VALUE],
+        )
+        if context is None:
+            return None, None
+        recipient, campaign = context
+
+        cleaned_answer_text = answer_text.strip()
+        if not cleaned_answer_text:
+            raise ValueError("Напиши ответ текстом, пожалуйста.")
+
+        answer_updated = await repo.update_answer_text(
+            session,
+            recipient_id=recipient.id,
+            text_value=cleaned_answer_text,
+        )
+        if not answer_updated:
+            raise ValueError("feedback answer not found")
+
         reward = await repo.issue_reward(
             session,
             campaign=campaign,

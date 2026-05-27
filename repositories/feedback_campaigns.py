@@ -510,6 +510,59 @@ async def get_text_answer_page(
     return dict(row) if row else None
 
 
+async def get_button_text_answer_count(
+    session: AsyncSession,
+    run_id: int,
+    button_value: int,
+) -> int:
+    result = await session.execute(
+        select(func.count(FeedbackSurveyAnswer.id)).where(
+            and_(
+                FeedbackSurveyAnswer.run_id == run_id,
+                FeedbackSurveyAnswer.answer_type == FeedbackAnswerType.BUTTON,
+                FeedbackSurveyAnswer.button_value == button_value,
+                FeedbackSurveyAnswer.text_value.isnot(None),
+                FeedbackSurveyAnswer.is_valid.is_(True),
+            )
+        )
+    )
+    return result.scalar_one()
+
+
+async def get_button_text_answer_page(
+    session: AsyncSession,
+    run_id: int,
+    button_value: int,
+    page: int,
+) -> dict | None:
+    result = await session.execute(
+        select(
+            FeedbackSurveyAnswer.id.label("answer_id"),
+            FeedbackSurveyAnswer.user_id.label("user_id"),
+            FeedbackSurveyAnswer.telegram_id_snapshot.label("telegram_id"),
+            FeedbackSurveyAnswer.text_value.label("text_value"),
+            FeedbackSurveyAnswer.text_length.label("text_length"),
+            FeedbackSurveyAnswer.created_at.label("created_at"),
+            User.telegram_username.label("telegram_username"),
+        )
+        .outerjoin(User, User.id == FeedbackSurveyAnswer.user_id)
+        .where(
+            and_(
+                FeedbackSurveyAnswer.run_id == run_id,
+                FeedbackSurveyAnswer.answer_type == FeedbackAnswerType.BUTTON,
+                FeedbackSurveyAnswer.button_value == button_value,
+                FeedbackSurveyAnswer.text_value.isnot(None),
+                FeedbackSurveyAnswer.is_valid.is_(True),
+            )
+        )
+        .order_by(FeedbackSurveyAnswer.created_at.asc())
+        .offset(page)
+        .limit(1)
+    )
+    row = result.mappings().first()
+    return dict(row) if row else None
+
+
 async def get_recipient_with_campaign(
     session: AsyncSession,
     recipient_id: int,
@@ -549,6 +602,37 @@ async def find_pending_text_recipient(
     return result.one_or_none()
 
 
+async def find_pending_button_text_recipient(
+    session: AsyncSession,
+    telegram_id: int,
+    button_values: list[int],
+) -> tuple[FeedbackCampaignRecipient, FeedbackCampaign] | None:
+    result = await session.execute(
+        select(FeedbackCampaignRecipient, FeedbackCampaign)
+        .join(
+            FeedbackCampaign,
+            FeedbackCampaign.id == FeedbackCampaignRecipient.campaign_id,
+        )
+        .join(
+            FeedbackSurveyAnswer,
+            FeedbackSurveyAnswer.recipient_id == FeedbackCampaignRecipient.id,
+        )
+        .where(
+            and_(
+                FeedbackCampaignRecipient.telegram_id_snapshot == telegram_id,
+                FeedbackCampaignRecipient.status == FeedbackRecipientStatus.ANSWERED,
+                FeedbackCampaign.survey_type == FeedbackSurveyType.BUTTONS,
+                FeedbackSurveyAnswer.answer_type == FeedbackAnswerType.BUTTON,
+                FeedbackSurveyAnswer.button_value.in_(button_values),
+                FeedbackSurveyAnswer.text_value.is_(None),
+            )
+        )
+        .order_by(FeedbackCampaignRecipient.answered_at.desc())
+        .limit(1)
+    )
+    return result.one_or_none()
+
+
 async def save_answer(
     session: AsyncSession,
     *,
@@ -581,6 +665,24 @@ async def save_answer(
     )
     await session.flush()
     return answer
+
+
+async def update_answer_text(
+    session: AsyncSession,
+    *,
+    recipient_id: int,
+    text_value: str,
+) -> bool:
+    result = await session.execute(
+        update(FeedbackSurveyAnswer)
+        .where(FeedbackSurveyAnswer.recipient_id == recipient_id)
+        .values(
+            text_value=text_value,
+            text_length=len(text_value),
+        )
+    )
+    await session.flush()
+    return result.rowcount > 0
 
 
 async def issue_reward(

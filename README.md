@@ -8,7 +8,7 @@
 ### Тестовая рассылка
 
 ```text
-/feedback_test <telegram_id> <buttons|text> <month|sixmonths|year[,year...]> [min_chars]
+/feedback_test <telegram_id> <buttons|text> <reward[,reward...]> [min_chars]
 ```
 
 Отправляет feedback-опрос одному пользователю для теста. Можно запускать много раз
@@ -19,13 +19,14 @@
 ```text
 /feedback_test 123456789 buttons month
 /feedback_test 123456789 buttons month,year
+/feedback_test 123456789 buttons month:40,year:30
 /feedback_test 123456789 text month,year 60
 ```
 
 ### Продовая рассылка
 
 ```text
-/feedback_send <count> <buttons|text> <month|sixmonths|year[,year...]> [min_chars]
+/feedback_send <count> <buttons|text> <reward[,reward...]> [min_chars]
 ```
 
 Создает продовую рассылку. Перед отправкой бот покажет админу список TG ID,
@@ -39,6 +40,7 @@
 ```text
 /feedback_send 10 buttons month
 /feedback_send 50 buttons month,year
+/feedback_send 50 buttons month:40,year:30
 /feedback_send 100 text month,sixmonths,year 60
 ```
 
@@ -68,7 +70,19 @@
 
 Показывает результаты конкретного feedback-run.
 
-Для `buttons` выводит статистику по вариантам ответа и скидкам:
+Для `buttons` выводит статистику по вариантам ответа и скидкам.
+
+Особые варианты:
+
+```text
+Не разобрался с подключением - бот покажет контакт поддержки и сразу даст скидку.
+Не было нужной локации - бот попросит написать, какой страны не хватило.
+Другая причина - бот попросит написать причину текстом.
+```
+
+Текст для `Не было нужной локации` и `Другая причина` хранится в
+`feedback_survey_answers.text_value` той же записи, где хранится кнопочный ответ.
+В результатах появятся кнопки для постраничного просмотра таких текстов.
 
 ```text
 Ответы:
@@ -151,7 +165,13 @@ sixmonths
 year
 month,year
 month,sixmonths,year
+month:40
+month:40,year:30
+month:30,sixmonths:40,year:50
 ```
+
+Если процент не указан, используется скидка по умолчанию: `30%`.
+Кастомный процент задается через `:` после периода.
 
 `min_chars`:
 

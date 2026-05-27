@@ -22,6 +22,7 @@ from utils.sql_helpers import get_user_by_telegram_id
 from utils.sql_helpers import turn_on_autopay_allow
 from utils.sql_helpers import tx
 from utils.sql_helpers import update_user_telegram_username
+from utils.translator import translator as ts
 from common.models.tariff import str_to_tariff
 
 feedback_campaigns_router = Router()
@@ -204,6 +205,61 @@ def build_text_results_keyboard(run_id: int, page: int, total: int):
     return builder.as_markup()
 
 
+def get_feedback_button_text(button_value: int) -> str:
+    for option in feedback_texts.SURVEY_BUTTON_OPTIONS:
+        if option["value"] == button_value:
+            return option["text"]
+    return f"Кнопка {button_value}"
+
+
+def get_button_text_prompt(button_value: int) -> str:
+    if button_value == feedback_texts.MISSING_LOCATION_BUTTON_VALUE:
+        return feedback_texts.MISSING_LOCATION_PROMPT
+    return feedback_texts.OTHER_REASON_PROMPT
+
+
+def build_button_text_entry_keyboard(
+    run_id: int,
+    button_value: int,
+    page: int,
+    total: int,
+):
+    builder = InlineKeyboardBuilder()
+    if total > 1:
+        prev_page = max(page - 1, 0)
+        next_page = min(page + 1, total - 1)
+        builder.button(
+            text="← Назад",
+            callback_data=f"fb_button_texts:{run_id}:{button_value}:{prev_page}",
+        )
+        builder.button(
+            text="Далее →",
+            callback_data=f"fb_button_texts:{run_id}:{button_value}:{next_page}",
+        )
+        builder.adjust(2)
+    builder.button(text="К статистике", callback_data=f"fb_results:{run_id}")
+    return builder.as_markup()
+
+
+def build_button_text_results_keyboard(run_id: int, counts_by_button: dict[int, int]):
+    active_counts = {
+        button_value: count
+        for button_value, count in counts_by_button.items()
+        if count > 0
+    }
+    if not active_counts:
+        return None
+
+    builder = InlineKeyboardBuilder()
+    for button_value, count in active_counts.items():
+        builder.button(
+            text=f"{get_feedback_button_text(button_value)} ({count})",
+            callback_data=f"fb_button_texts:{run_id}:{button_value}:0",
+        )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 async def build_feedback_results_message(
     session,
     run_id: int,
@@ -219,6 +275,16 @@ async def build_feedback_results_message(
 
     if campaign.survey_type == feedback_service.FeedbackSurveyType.BUTTONS:
         button_stats = await repo.get_button_answer_stats(session, run_id)
+        button_text_counts = {}
+        for button_value in [
+            feedback_texts.MISSING_LOCATION_BUTTON_VALUE,
+            feedback_texts.OTHER_REASON_BUTTON_VALUE,
+        ]:
+            button_text_counts[button_value] = await repo.get_button_text_answer_count(
+                session,
+                run_id,
+                button_value,
+            )
         return (
             format_buttons_results(
                 run=run,
@@ -227,7 +293,7 @@ async def build_feedback_results_message(
                 button_stats=button_stats,
                 reward_stats=reward_stats,
             ),
-            None,
+            build_button_text_results_keyboard(run_id, button_text_counts),
         )
 
     total = await repo.get_text_answer_count(session, run_id)
@@ -247,6 +313,52 @@ async def build_feedback_results_message(
             answer=answer,
         ),
         build_text_results_keyboard(run_id, page, total),
+    )
+
+
+async def build_button_texts_message(
+    session,
+    run_id: int,
+    button_value: int,
+    page: int = 0,
+) -> tuple[str, object | None] | None:
+    context = await repo.get_run_with_campaign(session, run_id)
+    if context is None:
+        return None
+
+    run, campaign = context
+    counts = await repo.get_run_counts(session, run_id)
+    reward_stats = await repo.get_reward_period_stats(session, run_id)
+    total = await repo.get_button_text_answer_count(
+        session,
+        run_id,
+        button_value,
+    )
+    if total:
+        page = max(0, min(page, total - 1))
+    else:
+        page = 0
+    answer = (
+        await repo.get_button_text_answer_page(
+            session,
+            run_id,
+            button_value,
+            page,
+        )
+        if total
+        else None
+    )
+    return (
+        format_text_results_page(
+            run=run,
+            campaign=campaign,
+            counts=counts,
+            reward_stats=reward_stats,
+            page=page,
+            total=total,
+            answer=answer,
+        ),
+        build_button_text_entry_keyboard(run_id, button_value, page, total),
     )
 
 
@@ -300,7 +412,8 @@ async def on_feedback_test(
     args = message.text.split()[1:] if message.text else []
     if len(args) < 3:
         await message.answer(
-            "Формат: /feedback_test <telegram_id> <buttons|text> <month,sixmonths,year> [min_chars]"
+            "Формат: /feedback_test <telegram_id> <buttons|text> "
+            "<month[:discount],sixmonths[:discount],year[:discount]> [min_chars]"
         )
         return
 
@@ -341,7 +454,8 @@ async def on_feedback_send(
     args = message.text.split()[1:] if message.text else []
     if len(args) < 3:
         await message.answer(
-            "Формат: /feedback_send <count> <buttons|text> <month,sixmonths,year> [min_chars]"
+            "Формат: /feedback_send <count> <buttons|text> "
+            "<month[:discount],sixmonths[:discount],year[:discount]> [min_chars]"
         )
         return
 
@@ -429,6 +543,7 @@ async def on_feedback_send_confirm(
 @feedback_campaigns_router.callback_query(F.data.startswith("fb_answer:"))
 async def on_feedback_button_answer(
     query: CallbackQuery,
+    state: FSMContext,
     session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
 ):
     try:
@@ -445,6 +560,19 @@ async def on_feedback_button_answer(
                 button_value=int(button_value),
             )
         )
+        if reward_id is None:
+            await state.set_state(FeedbackBroadcastStates.other_reason)
+            await state.update_data(recipient_id=int(recipient_id))
+            await query.message.answer(get_button_text_prompt(int(button_value)))
+            await query.answer("Спасибо, жду текст")
+            return
+
+        if int(button_value) == feedback_texts.CONNECTION_PROBLEM_BUTTON_VALUE:
+            await query.message.answer(
+                feedback_texts.CONNECTION_SUPPORT_NOTE.format(
+                    support_text=ts.get("ru", "SUPPORT_ANSWER")
+                )
+            )
         await query.message.answer(
             feedback_texts.REWARD_ISSUED,
             reply_markup=feedback_service.build_reward_keyboard(
@@ -460,6 +588,7 @@ async def on_feedback_button_answer(
 @feedback_campaigns_router.message(F.text, ~F.text.startswith("/"))
 async def on_feedback_text_answer(
     message: Message,
+    state: FSMContext,
     session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
 ):
     try:
@@ -467,6 +596,42 @@ async def on_feedback_text_answer(
             await update_user_telegram_username(
                 session, message.from_user.id, message.from_user.username
             )
+        current_state = await state.get_state()
+        if current_state == FeedbackBroadcastStates.other_reason.state:
+            data = await state.get_data()
+            reward_id, reward_options = (
+                await feedback_service.save_button_text_answer_and_issue_reward(
+                    session_maker=session_maker,
+                    telegram_id=message.from_user.id,
+                    recipient_id=int(data["recipient_id"]),
+                    answer_text=message.text,
+                )
+            )
+            await state.clear()
+            await message.answer(
+                feedback_texts.REWARD_ISSUED,
+                reply_markup=feedback_service.build_reward_keyboard(
+                    reward_id, reward_options
+                ),
+            )
+            return
+
+        reward_id, reward_options = (
+            await feedback_service.save_pending_button_text_answer_and_issue_reward(
+                session_maker=session_maker,
+                telegram_id=message.from_user.id,
+                answer_text=message.text,
+            )
+        )
+        if reward_id is not None:
+            await message.answer(
+                feedback_texts.REWARD_ISSUED,
+                reply_markup=feedback_service.build_reward_keyboard(
+                    reward_id, reward_options
+                ),
+            )
+            return
+
         reward_id, reward_options = (
             await feedback_service.save_text_answer_and_issue_reward(
                 session_maker=session_maker,
@@ -634,6 +799,61 @@ async def on_feedback_text_results_page(
     except Exception as exc:
         logging.exception("feedback text results page failed: %s", exc)
         await query.answer("Не получилось открыть страницу", show_alert=True)
+
+
+@feedback_campaigns_router.callback_query(
+    F.data.startswith("fb_button_texts:"),
+    IsAdmin(),
+)
+async def on_feedback_button_texts_page(
+    query: CallbackQuery,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    try:
+        _, run_id_raw, button_value_raw, page_raw = query.data.split(":")
+        run_id = int(run_id_raw)
+        button_value = int(button_value_raw)
+        page = int(page_raw)
+        async with tx(session_maker) as session:
+            result = await build_button_texts_message(
+                session,
+                run_id,
+                button_value,
+                page,
+            )
+        if result is None:
+            await query.answer("Такой run_id не найден.", show_alert=True)
+            return
+        text, keyboard = result
+        await query.message.edit_text(text, reply_markup=keyboard)
+        await query.answer()
+    except Exception as exc:
+        logging.exception("feedback button texts page failed: %s", exc)
+        await query.answer("Не получилось открыть страницу", show_alert=True)
+
+
+@feedback_campaigns_router.callback_query(
+    F.data.startswith("fb_results:"),
+    IsAdmin(),
+)
+async def on_feedback_results_back(
+    query: CallbackQuery,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    try:
+        _, run_id_raw = query.data.split(":")
+        run_id = int(run_id_raw)
+        async with tx(session_maker) as session:
+            result = await build_feedback_results_message(session, run_id)
+        if result is None:
+            await query.answer("Такой run_id не найден.", show_alert=True)
+            return
+        text, keyboard = result
+        await query.message.edit_text(text, reply_markup=keyboard)
+        await query.answer()
+    except Exception as exc:
+        logging.exception("feedback results back failed: %s", exc)
+        await query.answer("Не получилось открыть статистику", show_alert=True)
 
 
 @feedback_campaigns_router.message(F.text.startswith("/feedback_status"), IsAdmin())
