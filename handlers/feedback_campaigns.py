@@ -1,4 +1,5 @@
 import logging
+from html import escape
 
 import sqlalchemy
 from aiogram import F
@@ -20,10 +21,233 @@ from utils.config import Config
 from utils.sql_helpers import get_user_by_telegram_id
 from utils.sql_helpers import turn_on_autopay_allow
 from utils.sql_helpers import tx
+from utils.sql_helpers import update_user_telegram_username
 from common.models.tariff import str_to_tariff
 
 feedback_campaigns_router = Router()
 FEEDBACK_PREVIEW_CHUNK_SIZE = 120
+FEEDBACK_RUNS_DEFAULT_LIMIT = 20
+FEEDBACK_RUNS_MAX_LIMIT = 20
+FEEDBACK_TEXT_PREVIEW_LIMIT = 3000
+
+
+def enum_value(value) -> str:
+    return getattr(value, "value", str(value))
+
+
+def format_feedback_run_date(value) -> str:
+    if value is None:
+        return "-"
+    return value.strftime("%Y-%m-%d %H:%M")
+
+
+def format_reward_periods(reward_options: list[dict] | None) -> str:
+    if not reward_options:
+        return "-"
+    return ", ".join(option["subscription_period"] for option in reward_options)
+
+
+def format_feedback_runs(rows: list[dict]) -> str:
+    if not rows:
+        return "Продовых feedback-рассылок пока нет."
+
+    lines = ["Продовые feedback-рассылки:"]
+    for row in rows:
+        audience_count = row["audience_count"] or 0
+        user_limit = row["user_limit"] or audience_count
+        lines.extend(
+            [
+                "",
+                f"run_id: <code>{row['run_id']}</code> | "
+                f"{enum_value(row['survey_type'])} | {enum_value(row['status'])}",
+                f"Дата: {format_feedback_run_date(row['created_at'])} UTC",
+                f"Аудитория: {audience_count}/{user_limit} | "
+                f"отправлено: {row['sent_count'] or 0} | "
+                f"ответили: {row['answered_count'] or 0} | "
+                f"купили: {row['paid_count'] or 0}",
+                f"Скидки: {format_reward_periods(row['reward_options'])}",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def build_reward_stats_lines(
+    reward_options: list[dict] | None,
+    reward_stats: dict[str, dict[str, int]],
+) -> list[str]:
+    periods = []
+    for option in reward_options or []:
+        period = option["subscription_period"]
+        if period not in periods:
+            periods.append(period)
+    for period in reward_stats:
+        if period not in periods:
+            periods.append(period)
+
+    if not periods:
+        return ["Скидки: -"]
+
+    lines = ["Скидки:"]
+    for period in periods:
+        stats = reward_stats.get(period, {})
+        lines.append(
+            f"{period}: выбрали {stats.get('selected', 0)}, "
+            f"оплатили {stats.get('used', 0)}"
+        )
+    return lines
+
+
+def format_buttons_results(
+    *,
+    run,
+    campaign,
+    counts: dict[str, int],
+    button_stats: dict[int, int],
+    reward_stats: dict[str, dict[str, int]],
+) -> str:
+    lines = [
+        f"Feedback run <code>{run.id}</code>",
+        f"Тип: {enum_value(campaign.survey_type)}",
+        f"Статус: {enum_value(run.status)}",
+        f"Дата: {format_feedback_run_date(run.created_at)} UTC",
+        "",
+        f"Отправлено: {counts['sent']}",
+        f"Ответили: {counts['answered']}",
+        f"Наград выдано: {counts['rewarded']}",
+        f"Ошибок: {counts['failed']}",
+        "",
+        "Ответы:",
+    ]
+    for option in campaign.button_options or []:
+        value = option["value"]
+        lines.append(f"{option['text']}: {button_stats.get(value, 0)}")
+    if not campaign.button_options:
+        lines.append("-")
+
+    lines.append("")
+    lines.extend(build_reward_stats_lines(campaign.reward_options, reward_stats))
+    return "\n".join(lines)
+
+
+def trim_feedback_text(value: str | None) -> str:
+    if not value:
+        return "-"
+    if len(value) <= FEEDBACK_TEXT_PREVIEW_LIMIT:
+        return value
+    return value[:FEEDBACK_TEXT_PREVIEW_LIMIT] + "\n... текст обрезан"
+
+
+def format_text_results_page(
+    *,
+    run,
+    campaign,
+    counts: dict[str, int],
+    reward_stats: dict[str, dict[str, int]],
+    page: int,
+    total: int,
+    answer: dict | None,
+) -> str:
+    lines = [
+        f"Feedback run <code>{run.id}</code>",
+        f"Тип: {enum_value(campaign.survey_type)}",
+        f"Статус: {enum_value(run.status)}",
+        f"Дата: {format_feedback_run_date(run.created_at)} UTC",
+        "",
+        f"Отправлено: {counts['sent']}",
+        f"Ответили: {counts['answered']}",
+        f"Наград выдано: {counts['rewarded']}",
+        f"Ошибок: {counts['failed']}",
+        "",
+    ]
+    lines.extend(build_reward_stats_lines(campaign.reward_options, reward_stats))
+    lines.append("")
+
+    if total == 0 or answer is None:
+        lines.append("Текстовых ответов пока нет.")
+        return "\n".join(lines)
+
+    username = answer.get("telegram_username")
+    username_text = f"@{escape(username)}" if username else "@unknown"
+    text_value = escape(trim_feedback_text(answer.get("text_value")))
+    lines.extend(
+        [
+            f"Ответ {page + 1} / {total}",
+            "",
+            f"TG: {username_text}",
+            f"TG ID: <code>{answer['telegram_id']}</code>",
+            f"User ID: <code>{answer['user_id']}</code>",
+            f"Дата ответа: {format_feedback_run_date(answer['created_at'])} UTC",
+            "",
+            "Фидбек:",
+            text_value,
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_text_results_keyboard(run_id: int, page: int, total: int):
+    if total <= 1:
+        return None
+
+    prev_page = max(page - 1, 0)
+    next_page = min(page + 1, total - 1)
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="← Назад",
+        callback_data=f"fb_text_results:{run_id}:{prev_page}",
+    )
+    builder.button(
+        text="Далее →",
+        callback_data=f"fb_text_results:{run_id}:{next_page}",
+    )
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+async def build_feedback_results_message(
+    session,
+    run_id: int,
+    page: int = 0,
+) -> tuple[str, object | None] | None:
+    context = await repo.get_run_with_campaign(session, run_id)
+    if context is None:
+        return None
+
+    run, campaign = context
+    counts = await repo.get_run_counts(session, run_id)
+    reward_stats = await repo.get_reward_period_stats(session, run_id)
+
+    if campaign.survey_type == feedback_service.FeedbackSurveyType.BUTTONS:
+        button_stats = await repo.get_button_answer_stats(session, run_id)
+        return (
+            format_buttons_results(
+                run=run,
+                campaign=campaign,
+                counts=counts,
+                button_stats=button_stats,
+                reward_stats=reward_stats,
+            ),
+            None,
+        )
+
+    total = await repo.get_text_answer_count(session, run_id)
+    if total:
+        page = max(0, min(page, total - 1))
+    else:
+        page = 0
+    answer = await repo.get_text_answer_page(session, run_id, page) if total else None
+    return (
+        format_text_results_page(
+            run=run,
+            campaign=campaign,
+            counts=counts,
+            reward_stats=reward_stats,
+            page=page,
+            total=total,
+            answer=answer,
+        ),
+        build_text_results_keyboard(run_id, page, total),
+    )
 
 
 def parse_min_text_length(args: list[str], index: int, survey_type) -> int | None:
@@ -208,6 +432,10 @@ async def on_feedback_button_answer(
     session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
 ):
     try:
+        async with tx(session_maker) as session:
+            await update_user_telegram_username(
+                session, query.from_user.id, query.from_user.username
+            )
         _, recipient_id, button_value = query.data.split(":")
         reward_id, reward_options = (
             await feedback_service.save_button_answer_and_issue_reward(
@@ -235,6 +463,10 @@ async def on_feedback_text_answer(
     session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
 ):
     try:
+        async with tx(session_maker) as session:
+            await update_user_telegram_username(
+                session, message.from_user.id, message.from_user.username
+            )
         reward_id, reward_options = (
             await feedback_service.save_text_answer_and_issue_reward(
                 session_maker=session_maker,
@@ -327,6 +559,81 @@ async def on_feedback_reward_selected(
     except Exception as exc:
         logging.exception("feedback reward selection failed: %s", exc)
         await query.answer("Не получилось создать оплату", show_alert=True)
+
+
+@feedback_campaigns_router.message(F.text.startswith("/feedback_runs"), IsAdmin())
+async def on_feedback_runs(
+    message: Message,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    args = message.text.split()[1:] if message.text else []
+    try:
+        limit = FEEDBACK_RUNS_DEFAULT_LIMIT
+        if args:
+            limit = int(args[0])
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        limit = min(limit, FEEDBACK_RUNS_MAX_LIMIT)
+
+        async with tx(session_maker) as session:
+            rows = await repo.get_production_run_summaries(session, limit)
+        await message.answer(format_feedback_runs(rows))
+    except ValueError:
+        await message.answer("Формат: /feedback_runs [limit]")
+    except Exception as exc:
+        logging.exception("feedback_runs failed: %s", exc)
+        await message.answer("Не получилось получить список feedback-рассылок.")
+
+
+@feedback_campaigns_router.message(F.text.startswith("/feedback_results"), IsAdmin())
+async def on_feedback_results(
+    message: Message,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    args = message.text.split()[1:] if message.text else []
+    if not args:
+        await message.answer("Формат: /feedback_results <run_id>")
+        return
+
+    try:
+        run_id = int(args[0])
+        async with tx(session_maker) as session:
+            result = await build_feedback_results_message(session, run_id)
+        if result is None:
+            await message.answer("Такой run_id не найден.")
+            return
+        text, keyboard = result
+        await message.answer(text, reply_markup=keyboard)
+    except ValueError:
+        await message.answer("run_id должен быть числом")
+    except Exception as exc:
+        logging.exception("feedback_results failed: %s", exc)
+        await message.answer("Не получилось получить результаты feedback-рассылки.")
+
+
+@feedback_campaigns_router.callback_query(
+    F.data.startswith("fb_text_results:"),
+    IsAdmin(),
+)
+async def on_feedback_text_results_page(
+    query: CallbackQuery,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    try:
+        _, run_id_raw, page_raw = query.data.split(":")
+        run_id = int(run_id_raw)
+        page = int(page_raw)
+        async with tx(session_maker) as session:
+            result = await build_feedback_results_message(session, run_id, page)
+        if result is None:
+            await query.answer("Такой run_id не найден.", show_alert=True)
+            return
+        text, keyboard = result
+        await query.message.edit_text(text, reply_markup=keyboard)
+        await query.answer()
+    except Exception as exc:
+        logging.exception("feedback text results page failed: %s", exc)
+        await query.answer("Не получилось открыть страницу", show_alert=True)
 
 
 @feedback_campaigns_router.message(F.text.startswith("/feedback_status"), IsAdmin())

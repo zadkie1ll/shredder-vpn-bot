@@ -27,6 +27,17 @@ from common.models.db import User
 from common.models.db import UserTrafficProgress
 from common.models.db import YkPayment
 
+FEEDBACK_REWARD_SELECTED_VALUES = [
+    FeedbackRewardStatus.SELECTED,
+    FeedbackRewardStatus.SELECTED.value,
+    FeedbackRewardStatus.SELECTED.name,
+]
+FEEDBACK_REWARD_USED_VALUES = [
+    FeedbackRewardStatus.USED,
+    FeedbackRewardStatus.USED.value,
+    FeedbackRewardStatus.USED.name,
+]
+
 
 async def create_campaign_with_run(
     session: AsyncSession,
@@ -287,6 +298,216 @@ async def get_run_counts(session: AsyncSession, run_id: int) -> dict[str, int]:
         "rewarded": raw_counts.get(FeedbackRecipientStatus.REWARDED, 0),
         "failed": raw_counts.get(FeedbackRecipientStatus.FAILED, 0),
     }
+
+
+async def get_run_with_campaign(
+    session: AsyncSession,
+    run_id: int,
+) -> tuple[FeedbackCampaignRun, FeedbackCampaign] | None:
+    result = await session.execute(
+        select(FeedbackCampaignRun, FeedbackCampaign)
+        .join(
+            FeedbackCampaign,
+            FeedbackCampaign.id == FeedbackCampaignRun.campaign_id,
+        )
+        .where(FeedbackCampaignRun.id == run_id)
+        .limit(1)
+    )
+    return result.one_or_none()
+
+
+async def get_production_run_summaries(
+    session: AsyncSession,
+    limit: int,
+) -> list[dict]:
+    audience_count = (
+        select(func.count(FeedbackCampaignRecipient.id))
+        .where(FeedbackCampaignRecipient.run_id == FeedbackCampaignRun.id)
+        .scalar_subquery()
+    )
+    sent_count = (
+        select(func.count(FeedbackCampaignRecipient.id))
+        .where(
+            and_(
+                FeedbackCampaignRecipient.run_id == FeedbackCampaignRun.id,
+                FeedbackCampaignRecipient.status.in_(
+                    [
+                        FeedbackRecipientStatus.SENT,
+                        FeedbackRecipientStatus.ANSWERED,
+                        FeedbackRecipientStatus.REWARDED,
+                    ]
+                ),
+            )
+        )
+        .scalar_subquery()
+    )
+    answered_count = (
+        select(func.count(FeedbackCampaignRecipient.id))
+        .where(
+            and_(
+                FeedbackCampaignRecipient.run_id == FeedbackCampaignRun.id,
+                FeedbackCampaignRecipient.status.in_(
+                    [
+                        FeedbackRecipientStatus.ANSWERED,
+                        FeedbackRecipientStatus.REWARDED,
+                    ]
+                ),
+            )
+        )
+        .scalar_subquery()
+    )
+    paid_count = (
+        select(func.count(FeedbackReward.id))
+        .join(
+            FeedbackCampaignRecipient,
+            FeedbackCampaignRecipient.id == FeedbackReward.recipient_id,
+        )
+        .where(
+            and_(
+                FeedbackCampaignRecipient.run_id == FeedbackCampaignRun.id,
+                FeedbackReward.status.in_(FEEDBACK_REWARD_USED_VALUES),
+            )
+        )
+        .scalar_subquery()
+    )
+
+    result = await session.execute(
+        select(
+            FeedbackCampaignRun.id.label("run_id"),
+            FeedbackCampaignRun.status.label("status"),
+            FeedbackCampaignRun.created_at.label("created_at"),
+            FeedbackCampaignRun.started_at.label("started_at"),
+            FeedbackCampaignRun.finished_at.label("finished_at"),
+            FeedbackCampaignRun.user_limit.label("user_limit"),
+            FeedbackCampaign.survey_type.label("survey_type"),
+            FeedbackCampaign.reward_options.label("reward_options"),
+            audience_count.label("audience_count"),
+            sent_count.label("sent_count"),
+            answered_count.label("answered_count"),
+            paid_count.label("paid_count"),
+        )
+        .join(
+            FeedbackCampaign,
+            FeedbackCampaign.id == FeedbackCampaignRun.campaign_id,
+        )
+        .where(FeedbackCampaignRun.run_mode == FeedbackRunMode.NEAREST_EXPIRING)
+        .order_by(FeedbackCampaignRun.created_at.desc())
+        .limit(limit)
+    )
+    return [dict(row) for row in result.mappings().all()]
+
+
+async def get_button_answer_stats(
+    session: AsyncSession,
+    run_id: int,
+) -> dict[int, int]:
+    result = await session.execute(
+        select(
+            FeedbackSurveyAnswer.button_value,
+            func.count(FeedbackSurveyAnswer.id),
+        )
+        .where(
+            and_(
+                FeedbackSurveyAnswer.run_id == run_id,
+                FeedbackSurveyAnswer.answer_type == FeedbackAnswerType.BUTTON,
+                FeedbackSurveyAnswer.is_valid.is_(True),
+            )
+        )
+        .group_by(FeedbackSurveyAnswer.button_value)
+        .order_by(FeedbackSurveyAnswer.button_value)
+    )
+    return {button_value: count for button_value, count in result.all()}
+
+
+async def get_reward_period_stats(
+    session: AsyncSession,
+    run_id: int,
+) -> dict[str, dict[str, int]]:
+    result = await session.execute(
+        select(
+            FeedbackReward.selected_subscription_period,
+            FeedbackReward.status,
+            func.count(FeedbackReward.id),
+        )
+        .join(
+            FeedbackCampaignRecipient,
+            FeedbackCampaignRecipient.id == FeedbackReward.recipient_id,
+        )
+        .where(
+            and_(
+                FeedbackCampaignRecipient.run_id == run_id,
+                FeedbackReward.selected_subscription_period.isnot(None),
+            )
+        )
+        .group_by(
+            FeedbackReward.selected_subscription_period,
+            FeedbackReward.status,
+        )
+    )
+
+    stats: dict[str, dict[str, int]] = {}
+    for period, status, count in result.all():
+        period_stats = stats.setdefault(period, {"selected": 0, "used": 0})
+        status_value = getattr(status, "value", status)
+        if status_value in {
+            FeedbackRewardStatus.USED.value,
+            FeedbackRewardStatus.USED.name,
+        }:
+            period_stats["used"] += count
+            period_stats["selected"] += count
+        elif status_value in {
+            FeedbackRewardStatus.SELECTED.value,
+            FeedbackRewardStatus.SELECTED.name,
+        }:
+            period_stats["selected"] += count
+    return stats
+
+
+async def get_text_answer_count(
+    session: AsyncSession,
+    run_id: int,
+) -> int:
+    result = await session.execute(
+        select(func.count(FeedbackSurveyAnswer.id)).where(
+            and_(
+                FeedbackSurveyAnswer.run_id == run_id,
+                FeedbackSurveyAnswer.answer_type == FeedbackAnswerType.TEXT,
+                FeedbackSurveyAnswer.is_valid.is_(True),
+            )
+        )
+    )
+    return result.scalar_one()
+
+
+async def get_text_answer_page(
+    session: AsyncSession,
+    run_id: int,
+    page: int,
+) -> dict | None:
+    result = await session.execute(
+        select(
+            FeedbackSurveyAnswer.id.label("answer_id"),
+            FeedbackSurveyAnswer.user_id.label("user_id"),
+            FeedbackSurveyAnswer.telegram_id_snapshot.label("telegram_id"),
+            FeedbackSurveyAnswer.text_value.label("text_value"),
+            FeedbackSurveyAnswer.text_length.label("text_length"),
+            FeedbackSurveyAnswer.created_at.label("created_at"),
+            User.telegram_username.label("telegram_username"),
+        )
+        .outerjoin(User, User.id == FeedbackSurveyAnswer.user_id)
+        .where(
+            and_(
+                FeedbackSurveyAnswer.run_id == run_id,
+                FeedbackSurveyAnswer.answer_type == FeedbackAnswerType.TEXT,
+                FeedbackSurveyAnswer.is_valid.is_(True),
+            )
+        )
+        .order_by(FeedbackSurveyAnswer.created_at.asc())
+        .offset(page)
+        .limit(1)
+    )
+    row = result.mappings().first()
+    return dict(row) if row else None
 
 
 async def get_recipient_with_campaign(
