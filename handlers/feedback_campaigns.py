@@ -30,6 +30,8 @@ FEEDBACK_PREVIEW_CHUNK_SIZE = 120
 FEEDBACK_RUNS_DEFAULT_LIMIT = 20
 FEEDBACK_RUNS_MAX_LIMIT = 20
 FEEDBACK_TEXT_PREVIEW_LIMIT = 3000
+ASK_LOCATION_FLAGS = {"--ask-location", "--ask-region"}
+CONNECTION_SUPPORT_FLAGS = {"--connection-support", "--support-connect"}
 
 
 def enum_value(value) -> str:
@@ -367,6 +369,8 @@ def parse_min_text_length(args: list[str], index: int, survey_type) -> int | Non
         return None
     if len(args) <= index:
         return feedback_texts.DEFAULT_MIN_TEXT_LENGTH
+    if args[index].startswith("--"):
+        return feedback_texts.DEFAULT_MIN_TEXT_LENGTH
     try:
         value = int(args[index])
     except ValueError as exc:
@@ -374,6 +378,33 @@ def parse_min_text_length(args: list[str], index: int, survey_type) -> int | Non
     if value < 1:
         raise ValueError("min_chars must be positive")
     return value
+
+
+def min_text_length_arg_count(args: list[str], index: int, survey_type) -> int:
+    if survey_type != feedback_service.FeedbackSurveyType.TEXT:
+        return 0
+    if len(args) <= index:
+        return 0
+    return 0 if args[index].startswith("--") else 1
+
+
+def parse_feedback_behavior_flags(
+    args: list[str],
+    start_index: int,
+) -> dict[str, bool]:
+    behavior = {
+        "ask_missing_location_text": False,
+        "show_connection_support": False,
+    }
+    for flag in args[start_index:]:
+        normalized_flag = flag.strip().lower()
+        if normalized_flag in ASK_LOCATION_FLAGS:
+            behavior["ask_missing_location_text"] = True
+        elif normalized_flag in CONNECTION_SUPPORT_FLAGS:
+            behavior["show_connection_support"] = True
+        else:
+            raise ValueError(f"unknown feedback flag: {flag}")
+    return behavior
 
 
 async def send_feedback_audience_preview(
@@ -413,7 +444,8 @@ async def on_feedback_test(
     if len(args) < 3:
         await message.answer(
             "Формат: /feedback_test <telegram_id> <buttons|text> "
-            "<month[:discount],sixmonths[:discount],year[:discount]> [min_chars]"
+            "<month[:discount],sixmonths[:discount],year[:discount]> "
+            "[min_chars] [--ask-location] [--connection-support]"
         )
         return
 
@@ -422,6 +454,8 @@ async def on_feedback_test(
         survey_type = feedback_service.parse_survey_type(args[1])
         reward_options = feedback_service.parse_reward_options(args[2])
         min_text_length = parse_min_text_length(args, 3, survey_type)
+        flags_start_index = 3 + min_text_length_arg_count(args, 3, survey_type)
+        behavior_flags = parse_feedback_behavior_flags(args, flags_start_index)
 
         result = await feedback_service.start_feedback_test(
             bot=bot,
@@ -431,6 +465,7 @@ async def on_feedback_test(
             survey_type=survey_type,
             reward_options=reward_options,
             min_text_length=min_text_length,
+            **behavior_flags,
         )
         await message.answer(
             f"Тестовая feedback-рассылка создана.\n"
@@ -455,7 +490,8 @@ async def on_feedback_send(
     if len(args) < 3:
         await message.answer(
             "Формат: /feedback_send <count> <buttons|text> "
-            "<month[:discount],sixmonths[:discount],year[:discount]> [min_chars]"
+            "<month[:discount],sixmonths[:discount],year[:discount]> "
+            "[min_chars] [--ask-location] [--connection-support]"
         )
         return
 
@@ -466,6 +502,8 @@ async def on_feedback_send(
         survey_type = feedback_service.parse_survey_type(args[1])
         reward_options = feedback_service.parse_reward_options(args[2])
         min_text_length = parse_min_text_length(args, 3, survey_type)
+        flags_start_index = 3 + min_text_length_arg_count(args, 3, survey_type)
+        behavior_flags = parse_feedback_behavior_flags(args, flags_start_index)
 
         users = await feedback_service.preview_feedback_audience(
             session_maker=session_maker,
@@ -482,6 +520,7 @@ async def on_feedback_send(
             survey_type=survey_type.value,
             reward_options=reward_options,
             min_text_length=min_text_length,
+            **behavior_flags,
         )
         await message.answer(
             f"Перед отправкой проверь список выше.\n"
@@ -526,6 +565,8 @@ async def on_feedback_send_confirm(
             survey_type=feedback_service.parse_survey_type(data["survey_type"]),
             reward_options=data["reward_options"],
             min_text_length=data.get("min_text_length"),
+            ask_missing_location_text=data.get("ask_missing_location_text", False),
+            show_connection_support=data.get("show_connection_support", False),
         )
         await query.message.answer(
             f"Feedback-рассылка завершена.\n"
@@ -552,22 +593,20 @@ async def on_feedback_button_answer(
                 session, query.from_user.id, query.from_user.username
             )
         _, recipient_id, button_value = query.data.split(":")
-        reward_id, reward_options = (
-            await feedback_service.save_button_answer_and_issue_reward(
-                session_maker=session_maker,
-                telegram_id=query.from_user.id,
-                recipient_id=int(recipient_id),
-                button_value=int(button_value),
-            )
+        answer_result = await feedback_service.save_button_answer_and_issue_reward(
+            session_maker=session_maker,
+            telegram_id=query.from_user.id,
+            recipient_id=int(recipient_id),
+            button_value=int(button_value),
         )
-        if reward_id is None:
+        if answer_result.requires_text:
             await state.set_state(FeedbackBroadcastStates.other_reason)
             await state.update_data(recipient_id=int(recipient_id))
             await query.message.answer(get_button_text_prompt(int(button_value)))
             await query.answer("Спасибо, жду текст")
             return
 
-        if int(button_value) == feedback_texts.CONNECTION_PROBLEM_BUTTON_VALUE:
+        if answer_result.show_connection_support:
             await query.message.answer(
                 feedback_texts.CONNECTION_SUPPORT_NOTE.format(
                     support_text=ts.get("ru", "SUPPORT_ANSWER")
@@ -576,7 +615,7 @@ async def on_feedback_button_answer(
         await query.message.answer(
             feedback_texts.REWARD_ISSUED,
             reply_markup=feedback_service.build_reward_keyboard(
-                reward_id, reward_options
+                answer_result.reward_id, answer_result.reward_options
             ),
         )
         await query.answer("Спасибо за ответ!")

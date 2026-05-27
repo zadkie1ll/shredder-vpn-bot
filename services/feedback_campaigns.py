@@ -30,6 +30,14 @@ class FeedbackSendResult:
     failed_count: int
 
 
+@dataclass
+class FeedbackButtonAnswerResult:
+    reward_id: int | None
+    reward_options: list[dict] | None
+    requires_text: bool = False
+    show_connection_support: bool = False
+
+
 def parse_reward_options(value: str) -> list[dict]:
     reward_options = []
     seen_periods = set()
@@ -135,11 +143,46 @@ def discounted_price(option: dict) -> int:
     return max(1, tariff.price - discount_amount)
 
 
-def button_requires_text(button_value: int) -> bool:
-    return button_value in {
-        texts.MISSING_LOCATION_BUTTON_VALUE,
-        texts.OTHER_REASON_BUTTON_VALUE,
-    }
+def build_button_options(
+    *,
+    ask_missing_location_text: bool,
+    show_connection_support: bool,
+) -> list[dict]:
+    options = []
+    for option in texts.SURVEY_BUTTON_OPTIONS:
+        option = dict(option)
+        if option["value"] == texts.OTHER_REASON_BUTTON_VALUE:
+            option["requires_text"] = True
+        elif option["value"] == texts.MISSING_LOCATION_BUTTON_VALUE:
+            option["requires_text"] = ask_missing_location_text
+        elif option["value"] == texts.CONNECTION_PROBLEM_BUTTON_VALUE:
+            option["show_connection_support"] = show_connection_support
+        options.append(option)
+    return options
+
+
+def get_button_option(campaign: FeedbackCampaign, button_value: int) -> dict | None:
+    for option in campaign.button_options or []:
+        if option["value"] == button_value:
+            return option
+    return None
+
+
+def button_requires_text(campaign: FeedbackCampaign, button_value: int) -> bool:
+    option = get_button_option(campaign, button_value)
+    if option is not None and "requires_text" in option:
+        return bool(option.get("requires_text"))
+    return button_value == texts.OTHER_REASON_BUTTON_VALUE
+
+
+def button_shows_connection_support(
+    campaign: FeedbackCampaign,
+    button_value: int,
+) -> bool:
+    option = get_button_option(campaign, button_value)
+    if option is None:
+        return False
+    return bool(option.get("show_connection_support"))
 
 
 async def preview_feedback_audience(
@@ -169,6 +212,8 @@ async def start_feedback_test(
     survey_type: FeedbackSurveyType,
     reward_options: list[dict],
     min_text_length: int | None,
+    ask_missing_location_text: bool = False,
+    show_connection_support: bool = False,
 ) -> FeedbackSendResult:
     async with tx(session_maker) as session:
         user = await repo.get_test_audience_user(session, telegram_id)
@@ -180,7 +225,10 @@ async def start_feedback_test(
             survey_type=survey_type,
             min_text_length=min_text_length,
             message_text_key=survey_type.value,
-            button_options=texts.SURVEY_BUTTON_OPTIONS,
+            button_options=build_button_options(
+                ask_missing_location_text=ask_missing_location_text,
+                show_connection_support=show_connection_support,
+            ),
             reward_options=reward_options,
             run_mode=FeedbackRunMode.TEST_USER,
             created_by_telegram_id=admin_telegram_id,
@@ -216,6 +264,8 @@ async def start_feedback_send(
     survey_type: FeedbackSurveyType,
     reward_options: list[dict],
     min_text_length: int | None,
+    ask_missing_location_text: bool = False,
+    show_connection_support: bool = False,
 ) -> FeedbackSendResult:
     async with tx(session_maker) as session:
         users = await repo.get_feedback_audience(session, limit)
@@ -225,7 +275,10 @@ async def start_feedback_send(
             survey_type=survey_type,
             min_text_length=min_text_length,
             message_text_key=survey_type.value,
-            button_options=texts.SURVEY_BUTTON_OPTIONS,
+            button_options=build_button_options(
+                ask_missing_location_text=ask_missing_location_text,
+                show_connection_support=show_connection_support,
+            ),
             reward_options=reward_options,
             run_mode=FeedbackRunMode.NEAREST_EXPIRING,
             created_by_telegram_id=admin_telegram_id,
@@ -264,6 +317,8 @@ async def start_feedback_send_for_telegram_ids(
     survey_type: FeedbackSurveyType,
     reward_options: list[dict],
     min_text_length: int | None,
+    ask_missing_location_text: bool = False,
+    show_connection_support: bool = False,
 ) -> FeedbackSendResult:
     async with tx(session_maker) as session:
         users = await repo.get_users_by_telegram_ids(session, telegram_ids)
@@ -273,7 +328,10 @@ async def start_feedback_send_for_telegram_ids(
             survey_type=survey_type,
             min_text_length=min_text_length,
             message_text_key=survey_type.value,
-            button_options=texts.SURVEY_BUTTON_OPTIONS,
+            button_options=build_button_options(
+                ask_missing_location_text=ask_missing_location_text,
+                show_connection_support=show_connection_support,
+            ),
             reward_options=reward_options,
             run_mode=FeedbackRunMode.NEAREST_EXPIRING,
             created_by_telegram_id=admin_telegram_id,
@@ -342,7 +400,7 @@ async def save_button_answer_and_issue_reward(
     telegram_id: int,
     recipient_id: int,
     button_value: int,
-) -> tuple[int, list[dict]] | tuple[None, None]:
+) -> FeedbackButtonAnswerResult:
     async with tx(session_maker) as session:
         context = await repo.get_recipient_with_campaign(session, recipient_id)
         if context is None:
@@ -353,8 +411,8 @@ async def save_button_answer_and_issue_reward(
         if campaign.survey_type != FeedbackSurveyType.BUTTONS:
             raise ValueError("feedback campaign is not a button survey")
 
-        allowed_values = {option["value"] for option in campaign.button_options}
-        if button_value not in allowed_values:
+        option = get_button_option(campaign, button_value)
+        if option is None:
             raise ValueError("unknown feedback button value")
 
         await repo.save_answer(
@@ -363,8 +421,12 @@ async def save_button_answer_and_issue_reward(
             answer_type=FeedbackAnswerType.BUTTON,
             button_value=button_value,
         )
-        if button_requires_text(button_value):
-            return None, None
+        if button_requires_text(campaign, button_value):
+            return FeedbackButtonAnswerResult(
+                reward_id=None,
+                reward_options=None,
+                requires_text=True,
+            )
 
         reward = await repo.issue_reward(
             session,
@@ -372,7 +434,14 @@ async def save_button_answer_and_issue_reward(
             recipient=recipient,
             expires_in=timedelta(days=texts.DEFAULT_REWARD_EXPIRES_DAYS),
         )
-        return reward.id, reward.reward_options
+        return FeedbackButtonAnswerResult(
+            reward_id=reward.id,
+            reward_options=reward.reward_options,
+            show_connection_support=button_shows_connection_support(
+                campaign,
+                button_value,
+            ),
+        )
 
 
 async def save_button_text_answer_and_issue_reward(

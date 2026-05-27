@@ -8,7 +8,7 @@
 ### Тестовая рассылка
 
 ```text
-/feedback_test <telegram_id> <buttons|text> <reward[,reward...]> [min_chars]
+/feedback_test <telegram_id> <buttons|text> <reward[,reward...]> [min_chars] [flags]
 ```
 
 Отправляет feedback-опрос одному пользователю для теста. Можно запускать много раз
@@ -20,13 +20,15 @@
 /feedback_test 123456789 buttons month
 /feedback_test 123456789 buttons month,year
 /feedback_test 123456789 buttons month:40,year:30
+/feedback_test 123456789 buttons month:40 --ask-location
+/feedback_test 123456789 buttons month:40 --connection-support
 /feedback_test 123456789 text month,year 60
 ```
 
 ### Продовая рассылка
 
 ```text
-/feedback_send <count> <buttons|text> <reward[,reward...]> [min_chars]
+/feedback_send <count> <buttons|text> <reward[,reward...]> [min_chars] [flags]
 ```
 
 Создает продовую рассылку. Перед отправкой бот покажет админу список TG ID,
@@ -41,6 +43,7 @@
 /feedback_send 10 buttons month
 /feedback_send 50 buttons month,year
 /feedback_send 50 buttons month:40,year:30
+/feedback_send 50 buttons month:40 --ask-location --connection-support
 /feedback_send 100 text month,sixmonths,year 60
 ```
 
@@ -75,14 +78,14 @@
 Особые варианты:
 
 ```text
-Не разобрался с подключением - бот покажет контакт поддержки и сразу даст скидку.
-Не было нужной локации - бот попросит написать, какой страны не хватило.
-Другая причина - бот попросит написать причину текстом.
+Другая причина - всегда просит написать причину текстом.
+Не было нужной локации - просит написать страну только с флагом --ask-location.
+Не разобрался с подключением - показывает поддержку только с флагом --connection-support.
 ```
 
-Текст для `Не было нужной локации` и `Другая причина` хранится в
+Текст для кнопок, которые попросили уточнение, хранится в
 `feedback_survey_answers.text_value` той же записи, где хранится кнопочный ответ.
-В результатах появятся кнопки для постраничного просмотра таких текстов.
+В результатах появляются кнопки для постраничного просмотра таких текстов.
 
 ```text
 Ответы:
@@ -177,4 +180,22 @@ month:30,sixmonths:40,year:50
 
 ```text
 Только для text. Для buttons не указывать.
+```
+
+`flags`:
+
+```text
+--ask-location
+  Для buttons. Если пользователь выбрал "Не было нужной локации",
+  бот попросит написать, какой страны не хватило.
+
+--ask-region
+  Алиас для --ask-location.
+
+--connection-support
+  Для buttons. Если пользователь выбрал "Не разобрался с подключением",
+  бот покажет контакт поддержки перед выдачей скидки.
+
+--support-connect
+  Алиас для --connection-support.
 ```
