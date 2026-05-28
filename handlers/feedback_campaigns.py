@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from html import escape
 
 import sqlalchemy
@@ -12,12 +13,15 @@ from aiogram.exceptions import TelegramForbiddenError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import utils.payments as payments
+from common.rwms_client import RwmsClient
 from filters.is_admin import IsAdmin
 from handlers.feedback_states import FeedbackBroadcastStates
 from repositories import feedback_campaigns as repo
 from services import feedback_campaigns as feedback_service
 from texts import feedback_campaigns as feedback_texts
 from utils.config import Config
+from utils.rwms_helpers import update_user
+from utils.sql_helpers import extend_user_subscription_by_tg_id
 from utils.sql_helpers import get_user_by_telegram_id
 from utils.sql_helpers import turn_on_autopay_allow
 from utils.sql_helpers import tx
@@ -47,7 +51,13 @@ def format_feedback_run_date(value) -> str:
 def format_reward_periods(reward_options: list[dict] | None) -> str:
     if not reward_options:
         return "-"
-    return ", ".join(option["subscription_period"] for option in reward_options)
+    labels = []
+    for option in reward_options:
+        if option.get("reward_type") == "free_days":
+            labels.append(f"days:{option['days']}")
+        else:
+            labels.append(option["subscription_period"])
+    return ", ".join(labels)
 
 
 def format_feedback_runs(rows: list[dict]) -> str:
@@ -68,7 +78,7 @@ def format_feedback_runs(rows: list[dict]) -> str:
                 f"отправлено: {row['sent_count'] or 0} | "
                 f"ответили: {row['answered_count'] or 0} | "
                 f"купили: {row['paid_count'] or 0}",
-                f"Скидки: {format_reward_periods(row['reward_options'])}",
+                f"Награды: {format_reward_periods(row['reward_options'])}",
             ]
         )
     return "\n".join(lines)
@@ -80,7 +90,10 @@ def build_reward_stats_lines(
 ) -> list[str]:
     periods = []
     for option in reward_options or []:
-        period = option["subscription_period"]
+        if option.get("reward_type") == "free_days":
+            period = f"free_days:{option['days']}"
+        else:
+            period = option["subscription_period"]
         if period not in periods:
             periods.append(period)
     for period in reward_stats:
@@ -88,15 +101,19 @@ def build_reward_stats_lines(
             periods.append(period)
 
     if not periods:
-        return ["Скидки: -"]
+        return ["Награды: -"]
 
-    lines = ["Скидки:"]
+    lines = ["Награды:"]
     for period in periods:
         stats = reward_stats.get(period, {})
-        lines.append(
-            f"{period}: выбрали {stats.get('selected', 0)}, "
-            f"оплатили {stats.get('used', 0)}"
-        )
+        if period.startswith("free_days:"):
+            days = period.split(":", 1)[1]
+            lines.append(f"+{days} дн.: получили {stats.get('used', 0)}")
+        else:
+            lines.append(
+                f"{period}: выбрали {stats.get('selected', 0)}, "
+                f"оплатили {stats.get('used', 0)}"
+            )
     return lines
 
 
@@ -444,7 +461,7 @@ async def on_feedback_test(
     if len(args) < 3:
         await message.answer(
             "Формат: /feedback_test <telegram_id> <buttons|text> "
-            "<month[:discount],sixmonths[:discount],year[:discount]> "
+            "<month[:discount],sixmonths[:discount],year[:discount],days:<count>> "
             "[min_chars] [--ask-location] [--connection-support]"
         )
         return
@@ -490,7 +507,7 @@ async def on_feedback_send(
     if len(args) < 3:
         await message.answer(
             "Формат: /feedback_send <count> <buttons|text> "
-            "<month[:discount],sixmonths[:discount],year[:discount]> "
+            "<month[:discount],sixmonths[:discount],year[:discount],days:<count>> "
             "[min_chars] [--ask-location] [--connection-support]"
         )
         return
@@ -757,6 +774,101 @@ async def on_feedback_reward_selected(
     except Exception as exc:
         logging.exception("feedback reward selection failed: %s", exc)
         await query.answer("Не получилось создать оплату", show_alert=True)
+
+
+@feedback_campaigns_router.callback_query(F.data.startswith("fb_reward_days:"))
+async def on_feedback_free_days_reward_selected(
+    query: CallbackQuery,
+    rwms_client: RwmsClient,
+    config: Config,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    try:
+        _, reward_id_raw, days_raw = query.data.split(":")
+        reward_id = int(reward_id_raw)
+        days = int(days_raw)
+
+        async with tx(session_maker) as session:
+            reward = await repo.get_reward_for_user(
+                session,
+                reward_id=reward_id,
+                telegram_id=query.from_user.id,
+            )
+            if reward is None:
+                await query.answer(
+                    "Награда не найдена или уже использована.", show_alert=True
+                )
+                return
+
+            option = feedback_service.get_free_days_reward_option(
+                reward.reward_options,
+                days,
+            )
+            if option is None:
+                await query.answer("Такой награды нет в этой рассылке.", show_alert=True)
+                return
+            if reward.selected_subscription_period is not None:
+                await query.answer(
+                    "Эта награда уже выбрана или использована.", show_alert=True
+                )
+                return
+
+            db_user = await get_user_by_telegram_id(session, query.from_user.id)
+            if db_user is None:
+                await query.answer("Пользователь не найден.", show_alert=True)
+                return
+            claimed = await repo.claim_reward_free_days(
+                session,
+                reward_id=reward.id,
+                days=days,
+            )
+            if not claimed:
+                await query.answer(
+                    "Эта награда уже выбрана или использована.", show_alert=True
+                )
+                return
+
+        rwms_user = await rwms_client.get_user_by_username(str(query.from_user.id))
+        if rwms_user is None:
+            async with tx(session_maker) as session:
+                await repo.reset_free_days_reward_claim(session, reward_id=reward_id)
+            await query.answer("Подписка в RWMS не найдена.", show_alert=True)
+            return
+
+        interval = timedelta(days=days)
+        user_response, _ = await update_user(
+            rwms_client=rwms_client,
+            config=config,
+            user=rwms_user,
+            interval=interval,
+        )
+        if user_response is None:
+            async with tx(session_maker) as session:
+                await repo.reset_free_days_reward_claim(session, reward_id=reward_id)
+            await query.answer("Не получилось продлить подписку.", show_alert=True)
+            return
+
+        async with tx(session_maker) as session:
+            await extend_user_subscription_by_tg_id(
+                session=session,
+                telegram_id=query.from_user.id,
+                interval=interval,
+            )
+            await repo.mark_reward_free_days_used(
+                session,
+                reward_id=reward_id,
+                days=days,
+            )
+
+        await query.message.answer(
+            feedback_texts.FREE_DAYS_REWARD_APPLIED.format(days=days)
+        )
+        await query.answer("Готово")
+    except TelegramForbiddenError:
+        raise
+    except Exception as exc:
+        logging.exception("feedback free days reward failed: %s", exc)
+        await query.answer("Не получилось выдать награду", show_alert=True)
 
 
 @feedback_campaigns_router.message(F.text.startswith("/feedback_runs"), IsAdmin())

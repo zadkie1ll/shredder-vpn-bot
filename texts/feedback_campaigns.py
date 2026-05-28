@@ -49,9 +49,10 @@ OTHER_REASON_PROMPT = (
 CONNECTION_SUPPORT_NOTE = (
     "Если проблема с подключением все еще актуальна, напиши в поддержку:\n"
     "{support_text}\n\n"
-    "А скидку за ответ мы все равно уже подготовили."
+    "А награду за ответ мы все равно уже подготовили."
 )
 REWARD_ISSUED = "Спасибо за честный ответ! Вот твоя награда"
+FREE_DAYS_REWARD_APPLIED = "Готово! Мы добавили к твоей подписке {days} дн."
 
 NO_PENDING_TEXT_SURVEY = "Нет активного текстового опроса."
 
@@ -70,3 +71,7 @@ def reward_button_text(option: dict) -> str:
         discount_label = f"-{discount_amount}₽"
 
     return f"{tariff_to_human_str(tariff)} - {price}₽ ({discount_label})"
+
+
+def free_days_reward_button_text(option: dict) -> str:
+    return f"+{option['days']} дн. бесплатно"

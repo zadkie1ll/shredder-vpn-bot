@@ -366,6 +366,7 @@ async def get_production_run_summaries(
             and_(
                 FeedbackCampaignRecipient.run_id == FeedbackCampaignRun.id,
                 FeedbackReward.status.in_(FEEDBACK_REWARD_USED_VALUES),
+                ~FeedbackReward.selected_subscription_period.like("free_days:%"),
             )
         )
         .scalar_subquery()
@@ -762,5 +763,72 @@ async def mark_reward_selected(
             selected_subscription_period=subscription_period,
             selected_discount_percent=discount_percent,
             selected_discount_amount=discount_amount,
+        )
+    )
+
+
+async def mark_reward_free_days_used(
+    session: AsyncSession,
+    *,
+    reward_id: int,
+    days: int,
+) -> None:
+    await session.execute(
+        update(FeedbackReward)
+        .where(FeedbackReward.id == reward_id)
+        .values(
+            status=FeedbackRewardStatus.USED,
+            selected_subscription_period=f"free_days:{days}",
+            selected_discount_percent=None,
+            selected_discount_amount=days,
+            used_at=datetime.utcnow(),
+        )
+    )
+
+
+async def claim_reward_free_days(
+    session: AsyncSession,
+    *,
+    reward_id: int,
+    days: int,
+) -> bool:
+    result = await session.execute(
+        update(FeedbackReward)
+        .where(
+            and_(
+                FeedbackReward.id == reward_id,
+                FeedbackReward.status == FeedbackRewardStatus.ISSUED,
+                FeedbackReward.selected_subscription_period.is_(None),
+            )
+        )
+        .values(
+            status=FeedbackRewardStatus.SELECTED,
+            selected_subscription_period=f"free_days:{days}",
+            selected_discount_percent=None,
+            selected_discount_amount=days,
+        )
+    )
+    return (result.rowcount or 0) > 0
+
+
+async def reset_free_days_reward_claim(
+    session: AsyncSession,
+    *,
+    reward_id: int,
+) -> None:
+    await session.execute(
+        update(FeedbackReward)
+        .where(
+            and_(
+                FeedbackReward.id == reward_id,
+                FeedbackReward.status == FeedbackRewardStatus.SELECTED,
+                FeedbackReward.selected_subscription_period.like("free_days:%"),
+            )
+        )
+        .values(
+            status=FeedbackRewardStatus.ISSUED,
+            selected_subscription_period=None,
+            selected_discount_percent=None,
+            selected_discount_amount=None,
         )
     )

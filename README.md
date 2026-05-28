@@ -20,9 +20,11 @@
 /feedback_test 123456789 buttons month
 /feedback_test 123456789 buttons month,year
 /feedback_test 123456789 buttons month:40,year:30
+/feedback_test 123456789 buttons days:7
+/feedback_test 123456789 buttons month:40,days:7
 /feedback_test 123456789 buttons month:40 --ask-location
 /feedback_test 123456789 buttons month:40 --connection-support
-/feedback_test 123456789 text month,year 60
+/feedback_test 123456789 text month,year,days:7 60
 ```
 
 ### Продовая рассылка
@@ -43,8 +45,10 @@
 /feedback_send 10 buttons month
 /feedback_send 50 buttons month,year
 /feedback_send 50 buttons month:40,year:30
+/feedback_send 50 buttons days:7
+/feedback_send 50 buttons month:40,days:7
 /feedback_send 50 buttons month:40 --ask-location --connection-support
-/feedback_send 100 text month,sixmonths,year 60
+/feedback_send 100 text month,sixmonths,year,days:7 60
 ```
 
 ### Список продовых запусков
@@ -73,7 +77,7 @@
 
 Показывает результаты конкретного feedback-run.
 
-Для `buttons` выводит статистику по вариантам ответа и скидкам.
+Для `buttons` выводит статистику по вариантам ответа и наградам.
 
 Особые варианты:
 
@@ -92,9 +96,10 @@
 Не устроила цена: 4
 Не разобрался с подключением: 2
 
-Скидки:
+Награды:
 month: выбрали 3, оплатили 1
 year: выбрали 2, оплатили 0
++7 дн.: получили 5
 ```
 
 Для `text` выводит текстовые ответы постранично в одном сообщении. Кнопки
@@ -171,10 +176,15 @@ month,sixmonths,year
 month:40
 month:40,year:30
 month:30,sixmonths:40,year:50
+days:7
+month:40,days:7
+month:40,year:30,days:14
 ```
 
 Если процент не указан, используется скидка по умолчанию: `30%`.
 Кастомный процент задается через `:` после периода.
+Бесплатные дни задаются через `days:<количество>`, например `days:7`.
+Их можно комбинировать со скидками в одной рассылке.
 
 `min_chars`:
 
@@ -246,7 +256,16 @@ month:30,sixmonths:40,year:50
 
 Проверить, что кнопки скидок показывают разные цены для `month` и `year`.
 
-5. Проверить текстовый feedback:
+5. Проверить бесплатные дни:
+
+```text
+/feedback_test 123456789 buttons month:40,days:7
+```
+
+Ответить на опрос, нажать кнопку `+7 дн. бесплатно`, убедиться, что бот написал
+о начислении дней, а подписка продлилась в локальной БД и RWMS.
+
+6. Проверить текстовый feedback:
 
 ```text
 /feedback_test 123456789 text month:40,year:30 60
@@ -255,16 +274,16 @@ month:30,sixmonths:40,year:50
 Отправить текст короче 60 символов, затем валидный текст. Убедиться, что скидка
 появляется только после валидного ответа.
 
-6. Проверить результаты:
+7. Проверить результаты:
 
 ```text
 /feedback_results <run_id>
 ```
 
-Проверить статистику ответов, статистику скидок и постраничный просмотр текстов
-для `Другая причина` / `Не было нужной локации`.
+Проверить статистику ответов, статистику скидок, статистику бесплатных дней и
+постраничный просмотр текстов для `Другая причина` / `Не было нужной локации`.
 
-7. Проверить список запусков:
+8. Проверить список запусков:
 
 ```text
 /feedback_runs
@@ -272,7 +291,7 @@ month:30,sixmonths:40,year:50
 
 Убедиться, что тестовые запуски не отображаются.
 
-8. Проверить продовый preview без подтверждения:
+9. Проверить продовый preview без подтверждения:
 
 ```text
 /feedback_send 1 buttons month:40 --ask-location --connection-support

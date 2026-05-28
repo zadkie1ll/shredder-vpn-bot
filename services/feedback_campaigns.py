@@ -20,6 +20,9 @@ from texts import feedback_campaigns as texts
 from utils.sql_helpers import tx
 
 ALLOWED_REWARD_PERIODS = {"month", "sixmonths", "year"}
+FREE_DAYS_REWARD = "days"
+MIN_FREE_REWARD_DAYS = 1
+MAX_FREE_REWARD_DAYS = 365
 
 
 @dataclass
@@ -41,6 +44,7 @@ class FeedbackButtonAnswerResult:
 def parse_reward_options(value: str) -> list[dict]:
     reward_options = []
     seen_periods = set()
+    seen_free_days = set()
     for raw_option in value.split(","):
         option = raw_option.strip().lower()
         if not option:
@@ -48,8 +52,31 @@ def parse_reward_options(value: str) -> list[dict]:
 
         raw_period, separator, raw_discount_percent = option.partition(":")
         period = raw_period.strip()
+        if period == FREE_DAYS_REWARD:
+            if not separator or not raw_discount_percent:
+                raise ValueError("free days reward format: days:<count>")
+            try:
+                days = int(raw_discount_percent)
+            except ValueError as exc:
+                raise ValueError("free days reward must be an integer") from exc
+            if not (MIN_FREE_REWARD_DAYS <= days <= MAX_FREE_REWARD_DAYS):
+                raise ValueError(
+                    "free days reward must be between "
+                    f"{MIN_FREE_REWARD_DAYS} and {MAX_FREE_REWARD_DAYS}"
+                )
+            if days in seen_free_days:
+                raise ValueError(f"duplicate free days reward: days:{days}")
+            seen_free_days.add(days)
+            reward_options.append(
+                {
+                    "reward_type": "free_days",
+                    "days": days,
+                }
+            )
+            continue
+
         if period not in ALLOWED_REWARD_PERIODS:
-            raise ValueError("allowed reward periods: month,sixmonths,year")
+            raise ValueError("allowed rewards: month,sixmonths,year,days:<count>")
         if period in seen_periods:
             raise ValueError(f"duplicate reward period: {period}")
 
@@ -75,6 +102,7 @@ def parse_reward_options(value: str) -> list[dict]:
         seen_periods.add(period)
         reward_options.append(
             {
+                "reward_type": "discount",
                 "subscription_period": period,
                 "discount_percent": discount_percent,
             }
@@ -117,10 +145,16 @@ def build_reward_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for option in reward_options:
-        builder.button(
-            text=texts.reward_button_text(option),
-            callback_data=f"fb_reward:{reward_id}:{option['subscription_period']}",
-        )
+        if option.get("reward_type") == "free_days":
+            builder.button(
+                text=texts.free_days_reward_button_text(option),
+                callback_data=f"fb_reward_days:{reward_id}:{option['days']}",
+            )
+        else:
+            builder.button(
+                text=texts.reward_button_text(option),
+                callback_data=f"fb_reward:{reward_id}:{option['subscription_period']}",
+            )
     builder.adjust(1)
     return builder.as_markup()
 
@@ -129,7 +163,16 @@ def get_reward_option(
     reward_options: list[dict], subscription_period: str
 ) -> dict | None:
     for option in reward_options:
+        if option.get("reward_type") == "free_days":
+            continue
         if option["subscription_period"] == subscription_period:
+            return option
+    return None
+
+
+def get_free_days_reward_option(reward_options: list[dict], days: int) -> dict | None:
+    for option in reward_options:
+        if option.get("reward_type") == "free_days" and option.get("days") == days:
             return option
     return None
 
