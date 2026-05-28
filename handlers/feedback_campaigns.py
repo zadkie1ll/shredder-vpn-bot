@@ -463,6 +463,10 @@ def build_connection_support_keyboard():
     return builder.as_markup()
 
 
+def format_feedback_error(exc: ValueError) -> str:
+    return f"Ошибка: {escape(str(exc))}"
+
+
 @feedback_campaigns_router.message(F.text.startswith("/feedback_test"), IsAdmin())
 async def on_feedback_test(
     message: Message,
@@ -472,8 +476,8 @@ async def on_feedback_test(
     args = message.text.split()[1:] if message.text else []
     if len(args) < 3:
         await message.answer(
-            "Формат: /feedback_test <telegram_id> <buttons|text> "
-            "<month[:discount],sixmonths[:discount],year[:discount],days:<count>> "
+            "Формат: /feedback_test telegram_id buttons|text "
+            "month[:discount],sixmonths[:discount],year[:discount],days:count "
             "[min_chars] [--ask-location] [--connection-support]"
         )
         return
@@ -502,7 +506,7 @@ async def on_feedback_test(
             f"Отправлено: {result.sent_count}, ошибок: {result.failed_count}"
         )
     except ValueError as exc:
-        await message.answer(f"Ошибка: {exc}")
+        await message.answer(format_feedback_error(exc))
     except Exception as exc:
         logging.exception("feedback_test failed: %s", exc)
         await message.answer("Не получилось запустить тестовую feedback-рассылку.")
@@ -518,8 +522,8 @@ async def on_feedback_send(
     args = message.text.split()[1:] if message.text else []
     if len(args) < 3:
         await message.answer(
-            "Формат: /feedback_send <count> <buttons|text> "
-            "<month[:discount],sixmonths[:discount],year[:discount],days:<count>> "
+            "Формат: /feedback_send count buttons|text "
+            "month[:discount],sixmonths[:discount],year[:discount],days:count "
             "[min_chars] [--ask-location] [--connection-support]"
         )
         return
@@ -558,7 +562,7 @@ async def on_feedback_send(
             reply_markup=build_feedback_confirm_keyboard(),
         )
     except ValueError as exc:
-        await message.answer(f"Ошибка: {exc}")
+        await message.answer(format_feedback_error(exc))
     except Exception as exc:
         logging.exception("feedback_send failed: %s", exc)
         await message.answer("Не получилось запустить feedback-рассылку.")
@@ -716,7 +720,7 @@ async def on_feedback_text_answer(
             ),
         )
     except ValueError as exc:
-        await message.answer(str(exc))
+        await message.answer(escape(str(exc)))
     except TelegramForbiddenError:
         raise
     except Exception as exc:
@@ -1082,7 +1086,7 @@ async def on_feedback_cleanup(
             f"Эти пользователи снова доступны для продовой feedback-рассылки."
         )
     except ValueError as exc:
-        await message.answer(f"Ошибка: {exc}")
+        await message.answer(format_feedback_error(exc))
     except Exception as exc:
         logging.exception("feedback cleanup failed: %s", exc)
         await message.answer("Не получилось очистить старых получателей.")
