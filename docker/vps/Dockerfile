@@ -42,7 +42,7 @@ FROM python:$PYTHON_VERSION-slim-$DEBIAN_RELEASE
 ARG PYTHON_VERSION
 WORKDIR /app
 
-ENV PYTHON_LIB_PATH=/usr/local/lib/python${PYTHON_VERSION%.*}/site-packages
+ENV PYTHON_LIB_PATH=/usr/local/lib/python${PYTHON_VERSION}/site-packages
 
 COPY --from=builder $PYTHON_LIB_PATH $PYTHON_LIB_PATH
 COPY --from=builder /app /app
