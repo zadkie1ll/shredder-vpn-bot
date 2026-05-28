@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy import not_
 from sqlalchemy import select
 from sqlalchemy import update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.models.db import EventLog
@@ -643,19 +644,32 @@ async def save_answer(
     text_value: str | None = None,
     is_valid: bool = True,
 ) -> FeedbackSurveyAnswer:
-    answer = FeedbackSurveyAnswer(
-        campaign_id=recipient.campaign_id,
-        run_id=recipient.run_id,
-        recipient_id=recipient.id,
-        user_id=recipient.user_id,
-        telegram_id_snapshot=recipient.telegram_id_snapshot,
-        answer_type=answer_type,
-        button_value=button_value,
-        text_value=text_value,
-        text_length=len(text_value) if text_value is not None else None,
-        is_valid=is_valid,
+    result = await session.execute(
+        pg_insert(FeedbackSurveyAnswer)
+        .values(
+            campaign_id=recipient.campaign_id,
+            run_id=recipient.run_id,
+            recipient_id=recipient.id,
+            user_id=recipient.user_id,
+            telegram_id_snapshot=recipient.telegram_id_snapshot,
+            answer_type=answer_type,
+            button_value=button_value,
+            text_value=text_value,
+            text_length=len(text_value) if text_value is not None else None,
+            is_valid=is_valid,
+        )
+        .on_conflict_do_nothing(
+            constraint="uix_feedback_answer_recipient",
+        )
+        .returning(FeedbackSurveyAnswer.id)
     )
-    session.add(answer)
+    answer_id = result.scalar_one_or_none()
+    if answer_id is None:
+        existing = await get_answer_by_recipient(session, recipient.id)
+        if existing is None:
+            raise RuntimeError("feedback answer conflict without existing answer")
+        return existing
+
     await session.execute(
         update(FeedbackCampaignRecipient)
         .where(FeedbackCampaignRecipient.id == recipient.id)
@@ -665,7 +679,19 @@ async def save_answer(
         )
     )
     await session.flush()
-    return answer
+    return await session.get(FeedbackSurveyAnswer, answer_id)
+
+
+async def get_answer_by_recipient(
+    session: AsyncSession,
+    recipient_id: int,
+) -> FeedbackSurveyAnswer | None:
+    result = await session.execute(
+        select(FeedbackSurveyAnswer)
+        .where(FeedbackSurveyAnswer.recipient_id == recipient_id)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def update_answer_text(

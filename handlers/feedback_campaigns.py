@@ -1,4 +1,5 @@
 import logging
+from contextlib import suppress
 from datetime import timedelta
 from html import escape
 
@@ -6,6 +7,7 @@ import sqlalchemy
 from aiogram import F
 from aiogram import Bot
 from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 from aiogram.types import Message
@@ -582,6 +584,8 @@ async def on_feedback_send_confirm(
     data = await state.get_data()
     await state.clear()
     await query.message.edit_text("Запускаю feedback-рассылку...")
+    with suppress(TelegramBadRequest):
+        await query.answer("Запускаю рассылку")
 
     try:
         result = await feedback_service.start_feedback_send_for_telegram_ids(
@@ -601,11 +605,9 @@ async def on_feedback_send_confirm(
             f"Выбрано: {result.selected_count}, отправлено: {result.sent_count}, "
             f"ошибок: {result.failed_count}"
         )
-        await query.answer("Рассылка запущена")
     except Exception as exc:
         logging.exception("feedback_send confirm failed: %s", exc)
         await query.message.answer("Не получилось отправить feedback-рассылку.")
-        await query.answer("Ошибка отправки", show_alert=True)
 
 
 @feedback_campaigns_router.callback_query(F.data.startswith("fb_answer:"))

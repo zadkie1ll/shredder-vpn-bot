@@ -461,13 +461,14 @@ async def save_button_answer_and_issue_reward(
         if option is None:
             raise ValueError("unknown feedback button value")
 
-        await repo.save_answer(
+        answer = await repo.save_answer(
             session,
             recipient=recipient,
             answer_type=FeedbackAnswerType.BUTTON,
             button_value=button_value,
         )
-        if button_requires_text(campaign, button_value):
+        accepted_button_value = answer.button_value or button_value
+        if button_requires_text(campaign, accepted_button_value):
             return FeedbackButtonAnswerResult(
                 reward_id=None,
                 reward_options=None,
@@ -485,7 +486,7 @@ async def save_button_answer_and_issue_reward(
             reward_options=reward.reward_options,
             show_connection_support=button_shows_connection_support(
                 campaign,
-                button_value,
+                accepted_button_value,
             ),
         )
 
