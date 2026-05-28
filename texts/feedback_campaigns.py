@@ -18,20 +18,31 @@ SURVEY_BUTTON_OPTIONS = [
     {"value": 5, "text": "Другая причина"},
 ]
 
-SURVEY_MESSAGES = {
-    "buttons": (
-        "Нам нужен твой совет! Расскажи, что тебе не понравилось в нашем VPN "
-        "и что нам нужно улучшить, чтобы ты вернулся к нам. "
-        "За честный ответ - честная скидка.\n\n"
-        "Выбери один из вариантов ниже."
-    ),
-    "text": (
-        "Нам нужен твой совет! Расскажи, что тебе не понравилось в нашем VPN "
-        "и что нам нужно улучшить, чтобы ты вернулся к нам. "
-        "За честный ответ - честная скидка.\n\n"
-        "Напиши ответ одним сообщением."
-    ),
+SURVEY_MESSAGE_BODIES = {
+    "buttons": "Выбери один из вариантов ниже.",
+    "text": "Напиши ответ одним сообщением.",
 }
+
+
+def reward_promise_text(reward_options: list[dict] | None) -> str:
+    discount_percents = [
+        int(option["discount_percent"])
+        for option in reward_options or []
+        if option.get("reward_type") != "free_days" and option.get("discount_percent")
+    ]
+    if discount_percents:
+        return f"честная скидка {max(discount_percents)}%"
+    return "бесплатный доступ"
+
+
+def survey_message(message_text_key: str, reward_options: list[dict] | None) -> str:
+    body = SURVEY_MESSAGE_BODIES.get(message_text_key, SURVEY_MESSAGE_BODIES["text"])
+    return (
+        "Нам нужен твой совет! Расскажи, что тебе не понравилось в нашем VPN "
+        "и что нам нужно улучшить, чтобы ты вернулся к нам. "
+        f"За честный ответ - {reward_promise_text(reward_options)}.\n\n"
+        f"{body}"
+    )
 
 TEXT_TOO_SHORT = (
     "Спасибо! Ответ пока коротковат: нужно минимум {min_length} символов, "

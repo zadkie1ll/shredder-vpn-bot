@@ -417,7 +417,10 @@ async def send_feedback_to_recipients(
         try:
             message = await bot.send_message(
                 chat_id=recipient.telegram_id_snapshot,
-                text=texts.SURVEY_MESSAGES[campaign.message_text_key],
+                text=texts.survey_message(
+                    campaign.message_text_key,
+                    campaign.reward_options,
+                ),
                 reply_markup=build_survey_keyboard(campaign, recipient),
                 disable_web_page_preview=True,
             )
