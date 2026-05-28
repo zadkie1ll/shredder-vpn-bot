@@ -297,7 +297,7 @@ async def add_event_log(
 
 
 async def get_all_users(session: AsyncSession):
-    result = await session.execute(select(User.telegram_id))
+    result = await session.execute(select(User.telegram_id).where(User.telegram_id > 0))
     return result.scalars().all()
 
 

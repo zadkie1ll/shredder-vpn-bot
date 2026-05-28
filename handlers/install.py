@@ -47,10 +47,13 @@ async def _get_or_restore_user_for_install(
                 telegram_username=query.from_user.username,
             )
 
-    rw_user = await rwms_client.get_user_by_username(username=username)
+    rwms_username = db_user.username if db_user is not None else username
+    rw_user = await rwms_client.get_user_by_username(username=rwms_username)
+    if rw_user is None and rwms_username != username:
+        rw_user = await rwms_client.get_user_by_username(username=username)
 
     if rw_user is None:
-        logging.error(f"User {username} not found")
+        logging.error(f"User {rwms_username} not found")
         return None, None
 
     if db_user is not None:
