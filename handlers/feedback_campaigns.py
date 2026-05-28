@@ -20,6 +20,7 @@ from repositories import feedback_campaigns as repo
 from services import feedback_campaigns as feedback_service
 from texts import feedback_campaigns as feedback_texts
 from utils.config import Config
+from utils.public_resources import TELEGRAM_SUPPORT_URL
 from utils.rwms_helpers import update_user
 from utils.sql_helpers import extend_user_subscription_by_tg_id
 from utils.sql_helpers import get_user_by_telegram_id
@@ -451,6 +452,15 @@ def build_feedback_confirm_keyboard():
     return builder.as_markup()
 
 
+def build_connection_support_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=feedback_texts.CONNECTION_SUPPORT_BUTTON,
+        url=TELEGRAM_SUPPORT_URL,
+    )
+    return builder.as_markup()
+
+
 @feedback_campaigns_router.message(F.text.startswith("/feedback_test"), IsAdmin())
 async def on_feedback_test(
     message: Message,
@@ -625,9 +635,8 @@ async def on_feedback_button_answer(
 
         if answer_result.show_connection_support:
             await query.message.answer(
-                feedback_texts.CONNECTION_SUPPORT_NOTE.format(
-                    support_text=ts.get("ru", "SUPPORT_ANSWER")
-                )
+                feedback_texts.CONNECTION_SUPPORT_NOTE,
+                reply_markup=build_connection_support_keyboard(),
             )
         await query.message.answer(
             feedback_texts.REWARD_ISSUED,
