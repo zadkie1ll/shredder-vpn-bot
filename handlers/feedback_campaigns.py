@@ -209,12 +209,13 @@ def format_text_results_page(
 
 
 def build_text_results_keyboard(run_id: int, page: int, total: int):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Обновить", callback_data=f"fb_text_results:{run_id}:{page}")
     if total <= 1:
-        return None
+        return builder.as_markup()
 
     prev_page = max(page - 1, 0)
     next_page = min(page + 1, total - 1)
-    builder = InlineKeyboardBuilder()
     builder.button(
         text="← Назад",
         callback_data=f"fb_text_results:{run_id}:{prev_page}",
@@ -223,7 +224,7 @@ def build_text_results_keyboard(run_id: int, page: int, total: int):
         text="Далее →",
         callback_data=f"fb_text_results:{run_id}:{next_page}",
     )
-    builder.adjust(2)
+    builder.adjust(1, 2)
     return builder.as_markup()
 
 
@@ -247,6 +248,10 @@ def build_button_text_entry_keyboard(
     total: int,
 ):
     builder = InlineKeyboardBuilder()
+    builder.button(
+        text="Обновить",
+        callback_data=f"fb_button_texts:{run_id}:{button_value}:{page}",
+    )
     if total > 1:
         prev_page = max(page - 1, 0)
         next_page = min(page + 1, total - 1)
@@ -258,21 +263,22 @@ def build_button_text_entry_keyboard(
             text="Далее →",
             callback_data=f"fb_button_texts:{run_id}:{button_value}:{next_page}",
         )
-        builder.adjust(2)
     builder.button(text="К статистике", callback_data=f"fb_results:{run_id}")
+    builder.adjust(1, 2, 1)
     return builder.as_markup()
 
 
 def build_button_text_results_keyboard(run_id: int, counts_by_button: dict[int, int]):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Обновить", callback_data=f"fb_results_refresh:{run_id}")
     active_counts = {
         button_value: count
         for button_value, count in counts_by_button.items()
         if count > 0
     }
     if not active_counts:
-        return None
+        return builder.as_markup()
 
-    builder = InlineKeyboardBuilder()
     for button_value, count in active_counts.items():
         builder.button(
             text=f"{get_feedback_button_text(button_value)} ({count})",
@@ -1014,6 +1020,36 @@ async def on_feedback_results_back(
     except Exception as exc:
         logging.exception("feedback results back failed: %s", exc)
         await query.answer("Не получилось открыть статистику", show_alert=True)
+
+
+@feedback_campaigns_router.callback_query(
+    F.data.startswith("fb_results_refresh:"),
+    IsAdmin(),
+)
+async def on_feedback_results_refresh(
+    query: CallbackQuery,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    try:
+        _, run_id_raw = query.data.split(":")
+        run_id = int(run_id_raw)
+        async with tx(session_maker) as session:
+            result = await build_feedback_results_message(session, run_id)
+        if result is None:
+            await query.answer("Такой run_id не найден.", show_alert=True)
+            return
+        text, keyboard = result
+        await query.message.edit_text(text, reply_markup=keyboard)
+        await query.answer("Обновлено")
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            await query.answer("Данных пока нет")
+            return
+        logging.exception("feedback results refresh bad request: %s", exc)
+        await query.answer("Не получилось обновить", show_alert=True)
+    except Exception as exc:
+        logging.exception("feedback results refresh failed: %s", exc)
+        await query.answer("Не получилось обновить", show_alert=True)
 
 
 @feedback_campaigns_router.message(F.text.startswith("/feedback_status"), IsAdmin())
