@@ -748,13 +748,7 @@ async def on_feedback_reward_selected(
         )
 
         await query.message.answer(
-            feedback_texts.PAYMENT_WITH_DISCOUNT.format(
-                period=feedback_texts.reward_button_text(option).split(" - ")[0],
-                price=price,
-                original_price=tariff.price,
-                discount_percent=option.get("discount_percent") or 0,
-                url=confirmation_url,
-            ),
+            ts.get("ru", "YOUR_PAYMENT", price, confirmation_url),
             disable_web_page_preview=True,
         )
         await query.answer("Ссылка на оплату готова")
