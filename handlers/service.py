@@ -30,6 +30,7 @@ from filters.is_admin import IsAdmin
 from common.models.db import User
 from common.models.db import EventLog
 from common.models.db import ReferralBonus
+from common.models.db import ReferralBonusType
 from common.models.db import YkPayment
 from common.models.db import UserTrafficProgress
 from common.models.db import YkRecurrentPayment
@@ -940,6 +941,306 @@ def generate_user_referrals_messages(report_data: dict) -> list[str]:
     return split_message("\n".join(lines))
 
 
+@service_router.message(F.text.startswith("/ref-paid-pending"), IsAdmin())
+async def __on_referral_paid_pending_requested(
+    message: Message,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    args = message.text.split()[1:] if message.text else []
+    limit = 30
+
+    if args:
+        try:
+            limit = int(args[0])
+            if limit < 1 or limit > 100:
+                raise ValueError
+        except ValueError:
+            await message.answer(
+                "❌ Лимит должен быть числом от 1 до 100.\n"
+                "Пример: <code>/ref-paid-pending 50</code>"
+            )
+            return
+
+    async with tx(session_maker) as session:
+        rows = await get_pending_referral_purchase_bonus_rows(
+            session=session,
+            limit=limit,
+        )
+
+    for report_message in generate_pending_referral_purchase_bonus_messages(rows):
+        await message.answer(text=report_message)
+        await asyncio.sleep(0.5)
+
+
+async def get_pending_referral_purchase_bonus_rows(session, limit: int) -> list[dict]:
+    referral_user = aliased(User)
+    referrer_user = aliased(User)
+    purchase_bonus = aliased(ReferralBonus)
+
+    payments_subquery = (
+        select(
+            YkPayment.user_id.label("user_id"),
+            func.count(YkPayment.id).label("payments_count"),
+            func.coalesce(func.sum(YkPayment.amount), 0).label("payments_sum"),
+            func.min(YkPayment.created_at).label("first_payment_at"),
+            func.max(YkPayment.created_at).label("last_payment_at"),
+        )
+        .where(YkPayment.status == "succeeded")
+        .group_by(YkPayment.user_id)
+        .subquery()
+    )
+
+    result = await session.execute(
+        select(
+            referral_user,
+            referrer_user,
+            payments_subquery.c.payments_count,
+            payments_subquery.c.payments_sum,
+            payments_subquery.c.first_payment_at,
+            payments_subquery.c.last_payment_at,
+        )
+        .join(referrer_user, referral_user.referred_by_id == referrer_user.id)
+        .join(payments_subquery, payments_subquery.c.user_id == referral_user.id)
+        .outerjoin(
+            purchase_bonus,
+            and_(
+                purchase_bonus.referral_id == referral_user.id,
+                purchase_bonus.bonus_type == ReferralBonusType.PURCHASE,
+            ),
+        )
+        .where(
+            referral_user.referred_by_id.is_not(None),
+            purchase_bonus.id.is_(None),
+        )
+        .order_by(payments_subquery.c.first_payment_at.desc())
+        .limit(limit)
+    )
+
+    return [
+        {
+            "referral": referral,
+            "referrer": referrer,
+            "payments_count": payments_count or 0,
+            "payments_sum": payments_sum or 0,
+            "first_payment_at": first_payment_at,
+            "last_payment_at": last_payment_at,
+        }
+        for (
+            referral,
+            referrer,
+            payments_count,
+            payments_sum,
+            first_payment_at,
+            last_payment_at,
+        ) in result.all()
+    ]
+
+
+def generate_pending_referral_purchase_bonus_messages(rows: list[dict]) -> list[str]:
+    lines = [
+        "💸 <b>ОПЛАТИВШИЕ РЕФЕРАЛЫ БЕЗ БОНУСА</b>",
+        "",
+    ]
+
+    if not rows:
+        lines.append(
+            "<i>Нет оплативших рефералов, которым еще не отмечен бонус за покупку.</i>"
+        )
+        return ["\n".join(lines)]
+
+    lines.append(
+        "Чтобы начислить дни пригласившему: "
+        "<code>/ref-award-paid referral_tg_id days</code>"
+    )
+    lines.append("Пример: <code>/ref-award-paid 123456789 30</code>")
+    lines.append("")
+
+    for index, row in enumerate(rows, 1):
+        referral = row["referral"]
+        referrer = row["referrer"]
+        first_payment = row["first_payment_at"]
+        first_payment_text = (
+            first_payment.strftime("%d.%m.%Y") if first_payment else "нет даты"
+        )
+
+        lines.append(
+            f"{index}. Оплатил: {format_admin_user(referral)} | "
+            f"{row['payments_count']} оплат / {row['payments_sum']} ₽ | "
+            f"первая {first_payment_text}"
+        )
+        lines.append(f"   Пригласил: {format_admin_user(referrer)}")
+
+    return split_message("\n".join(lines))
+
+
+@service_router.message(F.text.startswith("/ref-award-paid"), IsAdmin())
+async def __on_referral_paid_bonus_award_requested(
+    message: Message,
+    rwms_client: RwmsClient,
+    config: Config,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    args = message.text.split()[1:] if message.text else []
+
+    if len(args) < 2:
+        await message.answer(
+            "❌ Неверный формат команды.\n"
+            "Используйте: <code>/ref-award-paid referral_tg_id days</code>\n"
+            "Пример: <code>/ref-award-paid 123456789 30</code>"
+        )
+        return
+
+    try:
+        referral_tg_id = int(args[0])
+        days = int(args[1])
+        if days < 1:
+            raise ValueError
+    except ValueError:
+        await message.answer(
+            "❌ referral_tg_id и days должны быть положительными числами."
+        )
+        return
+
+    interval = timedelta(days=days)
+
+    async with tx(session_maker) as session:
+        result = await award_referral_purchase_bonus(
+            session=session,
+            rwms_client=rwms_client,
+            config=config,
+            referral_tg_id=referral_tg_id,
+            interval=interval,
+        )
+
+    if result["status"] == "referral_not_found":
+        await message.answer("❌ Оплативший реферал с таким Telegram ID не найден.")
+        return
+    if result["status"] == "no_referrer":
+        await message.answer("❌ Этот пользователь не привязан к пригласившему.")
+        return
+    if result["status"] == "no_payment":
+        await message.answer("❌ У этого реферала нет успешной оплаты.")
+        return
+    if result["status"] == "already_awarded":
+        await message.answer("ℹ️ Бонус за покупку этого реферала уже отмечен.")
+        return
+    if result["status"] == "rwms_referrer_not_found":
+        await message.answer(
+            "❌ Пригласивший найден в БД, но не найден в RWMS. Дни не начислены."
+        )
+        return
+    if result["status"] == "rwms_update_failed":
+        await message.answer("❌ Не удалось обновить подписку пригласившего в RWMS.")
+        return
+
+    referrer = result["referrer"]
+    referral = result["referral"]
+    await message.answer(
+        "✅ Бонус начислен.\n"
+        f"Пригласивший: {format_admin_user(referrer)}\n"
+        f"Оплативший реферал: {format_admin_user(referral)}\n"
+        f"Добавлено: <b>{days} дн.</b>"
+    )
+
+
+async def award_referral_purchase_bonus(
+    session,
+    rwms_client: RwmsClient,
+    config: Config,
+    referral_tg_id: int,
+    interval: timedelta,
+) -> dict:
+    referral_user = aliased(User)
+    referrer_user = aliased(User)
+
+    result = await session.execute(
+        select(referral_user, referrer_user)
+        .outerjoin(referrer_user, referral_user.referred_by_id == referrer_user.id)
+        .where(referral_user.telegram_id == referral_tg_id)
+        .limit(1)
+    )
+    row = result.first()
+
+    if row is None:
+        return {"status": "referral_not_found"}
+
+    referral, referrer = row
+    if referrer is None:
+        return {"status": "no_referrer", "referral": referral}
+
+    has_success_payment = await session.scalar(
+        select(YkPayment.id)
+        .where(
+            and_(
+                YkPayment.user_id == referral.id,
+                YkPayment.status == "succeeded",
+            )
+        )
+        .limit(1)
+    )
+    if has_success_payment is None:
+        return {"status": "no_payment", "referral": referral, "referrer": referrer}
+
+    already_awarded = await session.scalar(
+        select(ReferralBonus.id)
+        .where(
+            and_(
+                ReferralBonus.referral_id == referral.id,
+                ReferralBonus.bonus_type == ReferralBonusType.PURCHASE,
+            )
+        )
+        .limit(1)
+    )
+    if already_awarded is not None:
+        return {
+            "status": "already_awarded",
+            "referral": referral,
+            "referrer": referrer,
+        }
+
+    referrer_username = referrer.username or str(referrer.telegram_id)
+    rwms_user = await rwms_client.get_user_by_username(referrer_username)
+    if rwms_user is None:
+        return {
+            "status": "rwms_referrer_not_found",
+            "referral": referral,
+            "referrer": referrer,
+        }
+
+    user_response, _ = await update_user(
+        rwms_client=rwms_client,
+        config=config,
+        user=rwms_user,
+        interval=interval,
+    )
+    if user_response is None:
+        return {
+            "status": "rwms_update_failed",
+            "referral": referral,
+            "referrer": referrer,
+        }
+
+    await extend_user_subscription_by_tg_id(
+        session=session,
+        telegram_id=referrer.telegram_id,
+        interval=interval,
+    )
+    session.add(
+        ReferralBonus(
+            referral_id=referral.id,
+            referrer_id=referrer.id,
+            bonus_type=ReferralBonusType.PURCHASE,
+            days_added=interval.days,
+        )
+    )
+
+    return {
+        "status": "ok",
+        "referral": referral,
+        "referrer": referrer,
+    }
+
+
 @service_router.message(F.text.startswith("/statinterval"), IsAdmin())
 async def __on_stat_interval_requested(
     message: Message,
@@ -1138,6 +1439,8 @@ async def get_subscription_payment_stats_by_interval(
                 and_(
                     YkPayment.status == "succeeded",
                     YkPayment.user_id.in_(users_list),
+                    YkPayment.created_at >= start_datetime,
+                    YkPayment.created_at <= end_datetime,
                 )
             )
             .group_by(YkPayment.subscription_period)
@@ -1152,6 +1455,8 @@ async def get_subscription_payment_stats_by_interval(
             and_(
                 YkPayment.status == "succeeded",
                 YkPayment.user_id.in_(users_list),
+                YkPayment.created_at >= start_datetime,
+                YkPayment.created_at <= end_datetime,
             )
         )
 
