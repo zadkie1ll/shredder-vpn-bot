@@ -27,6 +27,7 @@ from .misc import send_analytics_event_with_session
 from .misc import send_conversion_event
 from .misc import traffic_source_from_args
 from .misc import referrer_username_from_args
+from .misc import sales_referrer_username_from_args
 from .misc import data_limit_reset_strategy_to_str
 from utils.config import Config
 from utils.public_resources import TELEGRAM_BOT_URL
@@ -50,6 +51,7 @@ from utils.sql_helpers import add_user_to_traffic_progress
 from utils.sql_helpers import has_payment_for_user_by_tg_id
 from utils.sql_helpers import get_last_traffic_source_by_telegram_id
 from common.models import analytics_event
+from common.models.db import ReferralType
 from common.rwms_client import RwmsClient
 from common.models.messages import ConversionEvent
 
@@ -105,6 +107,14 @@ async def __main_menu_button_clicked(
         ymid = ymid_from_args(command.args)
         traffic_source = traffic_source_from_args(command.args)
         referrer_username = referrer_username_from_args(command.args)
+        sales_referrer_username = sales_referrer_username_from_args(command.args)
+        referral_type = None
+
+        if sales_referrer_username is not None:
+            referrer_username = sales_referrer_username
+            referral_type = ReferralType.SALES_PURCHASE
+        elif referrer_username is not None:
+            referral_type = ReferralType.STANDARD
 
         #
         # Здесь надо запросить юзера из БД и взять его username по которому найти подписку в remnawave
@@ -119,6 +129,12 @@ async def __main_menu_button_clicked(
 
         if referrer:
             logging.info(f"referrer {referrer.username} found for user {log_user}")
+        else:
+            referral_type = None
+
+        has_standard_referral_bonus = (
+            referrer is not None and referral_type == ReferralType.STANDARD
+        )
 
         newly_created_user = False
         username = str(message.from_user.id)
@@ -135,7 +151,7 @@ async def __main_menu_button_clicked(
                 username=username,
                 message=message,
                 config=config,
-                from_referrer=referrer is not None,
+                from_referrer=has_standard_referral_bonus,
             )
 
             if rw_user is None:
@@ -158,6 +174,7 @@ async def __main_menu_button_clicked(
                         telegram_id=message.from_user.id,
                         expire_at=expire_at,
                         telegram_username=message.from_user.username,
+                        referral_type=referral_type,
                     )
 
                     await add_user_to_traffic_progress(
@@ -238,7 +255,7 @@ async def __main_menu_button_clicked(
         await message.answer(
             __get_welcome_message(
                 newly_created_user,
-                referrer is not None,
+                has_standard_referral_bonus,
                 message.from_user.first_name,
                 config,
             ),

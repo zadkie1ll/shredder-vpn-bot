@@ -83,6 +83,8 @@ async def main(config: Config) -> None:
                 bot=bot,
                 redis_message_broker=redis_message_broker,
                 session_maker=session_maker,
+                rwms_client=rwms_client,
+                config=config,
             )
         )
 

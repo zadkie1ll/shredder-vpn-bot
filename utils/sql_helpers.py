@@ -52,6 +52,7 @@ async def save_user_in_db(
     telegram_id: Optional[int],
     expire_at: Optional[datetime],
     telegram_username: Optional[str] = None,
+    referral_type: Optional[ReferralType] = None,
 ) -> User:
     query = text("""
         INSERT INTO users (
@@ -92,7 +93,13 @@ async def save_user_in_db(
             "username": username,
             "telegram_username": telegram_username,
             "referred_by_id": referrer_id,
-            "referral_type": ReferralType.STANDARD if referrer_id is not None else None,
+            "referral_type": (
+                referral_type.value
+                if referral_type is not None
+                else (
+                    ReferralType.STANDARD.value if referrer_id is not None else None
+                )
+            ),
             "autopay_allow": True,
         },
     )

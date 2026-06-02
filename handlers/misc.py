@@ -155,6 +155,19 @@ def referrer_username_from_args(args: str) -> str | None:
         return None
 
 
+def sales_referrer_username_from_args(args: str) -> str | None:
+    try:
+        referrer_username: str | None = None
+        if args:
+            lst = args.split("-")
+            for arg in lst:
+                if arg.startswith("s"):
+                    referrer_username = arg[len("s") :]
+                    return referrer_username
+    except Exception:
+        return None
+
+
 def data_limit_reset_strategy_to_str(status: proto.TrafficLimitStrategy) -> str:
     if status == proto.TrafficLimitStrategy.NO_RESET:
         return "без сброса ⏰"

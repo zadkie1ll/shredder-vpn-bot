@@ -10,14 +10,18 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.exceptions import TelegramRetryAfter
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from common.rwms_client import RwmsClient
+from utils.config import Config
 from common.models.tariff import TrialPromotionTariff
 from common.models.tariff import str_to_tariff
 from common.models.tariff import tariff_to_human_str
 from common.models.messages import NotificateUserMessage
 from common.models.messages import ReferralPurchaseBonusApplied
 from common.models.messages import ReferralReachedTrafficBonusApplied
+from utils.referral_rewards import award_sales_referral_purchase_bonus
 from utils.redis_message_broker import RedisMessageBroker
 from utils.translator import translator as ts
+from utils.sql_helpers import tx
 
 from utils.sql_helpers import (
     has_payment_for_user_by_tg_id,
@@ -198,10 +202,48 @@ async def process_notification(
         )
 
 
+async def try_award_sales_referral_purchase_bonus(
+    bot: Bot,
+    session_maker: async_sessionmaker,
+    rwms_client: RwmsClient,
+    config: Config,
+    telegram_id: int,
+) -> None:
+    async with tx(session_maker) as session:
+        result = await award_sales_referral_purchase_bonus(
+            session=session,
+            rwms_client=rwms_client,
+            config=config,
+            referral_tg_id=telegram_id,
+        )
+
+    if result["status"] != "ok":
+        if result["status"] not in {"wrong_referral_type", "already_awarded"}:
+            logging.info(
+                "sales referral purchase bonus was not applied for user %s: %s",
+                telegram_id,
+                result["status"],
+            )
+        return
+
+    referrer = result["referrer"]
+    await process_notification(
+        bot=bot,
+        session_maker=session_maker,
+        message=ReferralPurchaseBonusApplied(
+            telegram_id=referrer.telegram_id,
+            referral_tariff=result["referral_tariff"],
+            bonus_days_count=result["days"],
+        ),
+    )
+
+
 async def listen_notifications(
     bot: Bot,
     redis_message_broker: RedisMessageBroker,
     session_maker: async_sessionmaker,
+    rwms_client: RwmsClient,
+    config: Config,
 ):
     while True:
         try:
@@ -223,6 +265,15 @@ async def listen_notifications(
                     continue
 
                 await process_notification(bot, session_maker, message)
+
+                if message.notification_type == "purchase-success-non-autopay":
+                    await try_award_sales_referral_purchase_bonus(
+                        bot=bot,
+                        session_maker=session_maker,
+                        rwms_client=rwms_client,
+                        config=config,
+                        telegram_id=message.telegram_id,
+                    )
                 continue
 
             logging.warning(f"invalid message type: {message}")
