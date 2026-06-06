@@ -298,6 +298,7 @@ async def build_feedback_results_message(
         return None
 
     run, campaign = context
+    await repo.reconcile_used_feedback_rewards(session, run_id)
     counts = await repo.get_run_counts(session, run_id)
     reward_stats = await repo.get_reward_period_stats(session, run_id)
 
@@ -907,6 +908,7 @@ async def on_feedback_runs(
         limit = min(limit, FEEDBACK_RUNS_MAX_LIMIT)
 
         async with tx(session_maker) as session:
+            await repo.reconcile_used_feedback_rewards(session)
             rows = await repo.get_production_run_summaries(session, limit)
         await message.answer(format_feedback_runs(rows))
     except ValueError:

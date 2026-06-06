@@ -27,6 +27,7 @@ from common.models.db import FeedbackSurveyType
 from common.models.db import User
 from common.models.db import UserTrafficProgress
 from common.models.db import YkPayment
+from common.models.tariff import str_to_tariff
 
 FEEDBACK_REWARD_SELECTED_VALUES = [
     FeedbackRewardStatus.SELECTED,
@@ -38,6 +39,124 @@ FEEDBACK_REWARD_USED_VALUES = [
     FeedbackRewardStatus.USED.value,
     FeedbackRewardStatus.USED.name,
 ]
+
+
+def get_feedback_reward_price(reward: FeedbackReward) -> int | None:
+    tariff = str_to_tariff(reward.selected_subscription_period)
+    if tariff is None:
+        return None
+
+    if reward.selected_discount_percent:
+        return max(
+            1,
+            round(tariff.price * (100 - reward.selected_discount_percent) / 100),
+        )
+    return max(1, tariff.price - (reward.selected_discount_amount or 0))
+
+
+def find_matching_feedback_payment(
+    reward: FeedbackReward,
+    payments: list[YkPayment],
+    assigned_payment_ids: set[str],
+) -> YkPayment | None:
+    expected_amount = get_feedback_reward_price(reward)
+    if expected_amount is None:
+        return None
+
+    for payment in payments:
+        payment_at = payment.captured_at or payment.created_at
+        if payment.payment_id in assigned_payment_ids:
+            continue
+        if payment.currency != "RUB":
+            continue
+        if payment.subscription_period != reward.selected_subscription_period:
+            continue
+        if payment.amount != expected_amount:
+            continue
+        if payment_at < reward.issued_at:
+            continue
+        if reward.expires_at is not None and payment_at > reward.expires_at:
+            continue
+        return payment
+    return None
+
+
+async def reconcile_used_feedback_rewards(
+    session: AsyncSession,
+    run_id: int | None = None,
+) -> int:
+    reward_query = (
+        select(FeedbackReward)
+        .join(
+            FeedbackCampaignRecipient,
+            FeedbackCampaignRecipient.id == FeedbackReward.recipient_id,
+        )
+        .where(
+            and_(
+                FeedbackReward.status.in_(FEEDBACK_REWARD_SELECTED_VALUES),
+                FeedbackReward.selected_subscription_period.isnot(None),
+                ~FeedbackReward.selected_subscription_period.like("free_days:%"),
+            )
+        )
+        .order_by(FeedbackReward.issued_at.asc())
+    )
+    if run_id is not None:
+        reward_query = reward_query.where(FeedbackCampaignRecipient.run_id == run_id)
+
+    rewards = list((await session.execute(reward_query)).scalars().all())
+    if not rewards:
+        return 0
+
+    user_ids = {reward.user_id for reward in rewards}
+    payment_result = await session.execute(
+        select(YkPayment)
+        .where(
+            and_(
+                YkPayment.user_id.in_(user_ids),
+                YkPayment.status == "succeeded",
+            )
+        )
+        .order_by(YkPayment.created_at.asc())
+    )
+    payments_by_user: dict[int, list[YkPayment]] = {}
+    for payment in payment_result.scalars().all():
+        payments_by_user.setdefault(payment.user_id, []).append(payment)
+
+    assigned_result = await session.execute(
+        select(FeedbackReward.payment_id).where(FeedbackReward.payment_id.isnot(None))
+    )
+    assigned_payment_ids = set(assigned_result.scalars().all())
+    reconciled = 0
+
+    for reward in rewards:
+        payment = find_matching_feedback_payment(
+            reward,
+            payments_by_user.get(reward.user_id, []),
+            assigned_payment_ids,
+        )
+        if payment is None:
+            continue
+
+        payment_at = payment.captured_at or payment.created_at
+        result = await session.execute(
+            update(FeedbackReward)
+            .where(
+                and_(
+                    FeedbackReward.id == reward.id,
+                    FeedbackReward.status.in_(FEEDBACK_REWARD_SELECTED_VALUES),
+                )
+            )
+            .values(
+                status=FeedbackRewardStatus.USED,
+                used_at=payment_at,
+                payment_id=payment.payment_id,
+            )
+        )
+        if result.rowcount:
+            assigned_payment_ids.add(payment.payment_id)
+            reconciled += 1
+
+    return reconciled
 
 
 async def create_campaign_with_run(

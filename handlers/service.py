@@ -2332,6 +2332,7 @@ def generate_user_payments_report(
             report += (
                 f"      {get_tariff_display_name(p.subscription_period)}{trial_mark}\n"
             )
+            report += f"      ID: <code>{escape(p.payment_id)}</code>\n"
 
     return report
 
