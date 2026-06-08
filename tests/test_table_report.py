@@ -1,7 +1,9 @@
+from collections import defaultdict
 from datetime import date
 from unittest import TestCase
 
 from handlers.service import generate_table_report_messages
+from handlers.service import register_first_paid_tariff
 
 
 class GenerateTableReportMessagesTest(TestCase):
@@ -41,6 +43,20 @@ class GenerateTableReportMessagesTest(TestCase):
 
         self.assertIn("TS_201 | 100 | 12", messages[-1])
         self.assertIn(
-            "Тарифы: 1 день: 2 | 1 месяц: 8 | 1 год: 2",
+            "Тариф перехода: 1 день: 2 | 1 месяц: 8 | 1 год: 2",
             messages[-1],
         )
+
+    def test_counts_only_first_paid_tariff_for_user(self):
+        source_stat = {
+            "paid_users": set(),
+            "tariff_users": defaultdict(set),
+        }
+
+        register_first_paid_tariff(source_stat, 101, "threedays")
+        register_first_paid_tariff(source_stat, 101, "month")
+        register_first_paid_tariff(source_stat, 102, "month")
+
+        self.assertEqual(source_stat["paid_users"], {101, 102})
+        self.assertEqual(source_stat["tariff_users"]["3 дня"], {101})
+        self.assertEqual(source_stat["tariff_users"]["1 месяц"], {102})

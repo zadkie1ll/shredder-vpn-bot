@@ -252,6 +252,17 @@ def source_display_name(
     return traffic_sources.get(traffic_source, f"TS_{traffic_source}")
 
 
+def register_first_paid_tariff(
+    source_stat: dict, user_id: int, subscription_period: str
+) -> None:
+    if user_id in source_stat["paid_users"]:
+        return
+
+    source_stat["paid_users"].add(user_id)
+    tariff_name = get_tariff_display_name(subscription_period)
+    source_stat["tariff_users"][tariff_name].add(user_id)
+
+
 @service_router.message(
     F.text.startswith("/table-report") | F.text.startswith("/sheet-report"), IsAdmin()
 )
@@ -399,10 +410,10 @@ async def get_table_report_data(
     for payment in payments:
         user_info = users.get(payment.user_id)
         if user_info is not None and payment.user_id in report_user_ids:
-            source_stats[user_info["traffic_source"]]["paid_users"].add(payment.user_id)
-            tariff_name = get_tariff_display_name(payment.subscription_period)
-            source_stats[user_info["traffic_source"]]["tariff_users"][tariff_name].add(
-                payment.user_id
+            register_first_paid_tariff(
+                source_stat=source_stats[user_info["traffic_source"]],
+                user_id=payment.user_id,
+                subscription_period=payment.subscription_period,
             )
 
     source_rows = []
@@ -570,7 +581,7 @@ def generate_table_report_messages(
                         key=lambda item: get_tariff_order(item[0]),
                     )
                 ]
-                source_lines.append(f"  Тарифы: {' | '.join(tariff_parts)}")
+                source_lines.append(f"  Тариф перехода: {' | '.join(tariff_parts)}")
     else:
         source_lines.append("нет данных | 0 | 0")
 
