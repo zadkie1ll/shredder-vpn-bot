@@ -357,6 +357,7 @@ async def get_table_report_data(
     payments_query = (
         select(
             YkPayment.user_id,
+            YkPayment.subscription_period,
         )
         .where(
             and_(
@@ -376,7 +377,13 @@ async def get_table_report_data(
     }
 
     users = {}
-    source_stats = defaultdict(lambda: {"new_users": 0, "paid_users": set()})
+    source_stats = defaultdict(
+        lambda: {
+            "new_users": 0,
+            "paid_users": set(),
+            "tariff_users": defaultdict(set),
+        }
+    )
 
     for row in subscription_events:
         traffic_source = row.event_payload.get("traffic_source")
@@ -392,17 +399,24 @@ async def get_table_report_data(
     for payment in payments:
         user_info = users.get(payment.user_id)
         if user_info is not None and payment.user_id in report_user_ids:
-            source_stats[user_info["traffic_source"]]["paid_users"].add(
+            source_stats[user_info["traffic_source"]]["paid_users"].add(payment.user_id)
+            tariff_name = get_tariff_display_name(payment.subscription_period)
+            source_stats[user_info["traffic_source"]]["tariff_users"][tariff_name].add(
                 payment.user_id
             )
 
     source_rows = []
     for traffic_source, stats in source_stats.items():
+        tariff_stats = {
+            tariff_name: len(user_ids)
+            for tariff_name, user_ids in stats["tariff_users"].items()
+        }
         source_rows.append(
             {
                 "source": source_display_name(traffic_source, traffic_sources),
                 "new_users": stats["new_users"],
                 "paid_users": len(stats["paid_users"]),
+                "tariff_stats": tariff_stats,
             }
         )
 
@@ -547,6 +561,16 @@ def generate_table_report_messages(
                 f"{source_row['new_users']} | "
                 f"{source_row['paid_users']}"
             )
+            tariff_stats = source_row.get("tariff_stats", {})
+            if tariff_stats:
+                tariff_parts = [
+                    f"{escape(tariff_name)}: {count}"
+                    for tariff_name, count in sorted(
+                        tariff_stats.items(),
+                        key=lambda item: get_tariff_order(item[0]),
+                    )
+                ]
+                source_lines.append(f"  Тарифы: {' | '.join(tariff_parts)}")
     else:
         source_lines.append("нет данных | 0 | 0")
 
