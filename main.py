@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from utils.config import Config
 from handlers import handlers_router
 from handlers.technical_work import technical_work_router
+from handlers.traffic_monitor import traffic_monitor_router
 from utils.notifications import listen_notifications
 from utils.redis_message_broker import RedisMessageBroker
 from middlewares.throttle import ThrottleMiddleware
@@ -73,6 +74,7 @@ async def main(config: Config) -> None:
         )
         session_maker = async_sessionmaker(bind=sql_engine, expire_on_commit=False)
 
+        dispatcher.include_router(traffic_monitor_router)
         if config.technical_work_enabled:
             dispatcher.include_router(technical_work_router)
         else:
