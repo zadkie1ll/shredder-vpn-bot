@@ -24,6 +24,7 @@ from utils.translator import translator as ts
 from utils.sql_helpers import tx
 
 from utils.sql_helpers import (
+    get_latest_successful_payment_by_tg_id,
     has_payment_for_user_by_tg_id,
 )
 
@@ -58,7 +59,8 @@ NOTIFICATION_CONFIG = {
         "random_list": nc_msgs,
     },
     "purchase-success-non-autopay": {
-        "static": ts.get("ru", "NOTIFY_SUCCESSFUL_NON_AUTOPAY")
+        "static": ts.get("ru", "NOTIFY_SUCCESSFUL_NON_AUTOPAY"),
+        "fallback": ts.get("ru", "NOTIFY_SUCCESSFUL_NON_AUTOPAY_FALLBACK"),
     },
     "purchase-failure-autopay": {"static": ts.get("ru", "NOTIFY_AUTOPAY_FAILURE")},
     "purchase-failure-non-autopay": {
@@ -146,6 +148,24 @@ async def process_notification(
 
     if "static" in config:
         text_to_send = config["static"]
+
+        if notification_type == "purchase-success-non-autopay":
+            async with session_maker() as session:
+                payment = await get_latest_successful_payment_by_tg_id(
+                    session=session, telegram_id=telegram_id
+                )
+
+            tariff = (
+                str_to_tariff(payment.subscription_period)
+                if payment is not None
+                else None
+            )
+            if tariff is not None:
+                days = tariff.subscription_period.days
+                days_word = pluralize_ru(days, ("день", "дня", "дней"))
+                text_to_send = text_to_send.format(days=days, days_word=days_word)
+            else:
+                text_to_send = config["fallback"]
 
         if isinstance(message, ReferralReachedTrafficBonusApplied):
             friend_forms = (

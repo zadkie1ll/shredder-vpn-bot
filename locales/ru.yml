@@ -400,7 +400,8 @@ NOTIFY_AUTOPAY_FAILURE: |
   <b>Продлите на несколько месяцев — так выгоднее!</b>
 
 NOTIFY_NON_AUTOPAY_FAILURE: Оплата не прошла! 😕
-NOTIFY_SUCCESSFUL_NON_AUTOPAY: Оплата прошла успешно! 😉
+NOTIFY_SUCCESSFUL_NON_AUTOPAY: Спасибо за оплату, ваша подписка продлена на {days} {days_word}! 😉
+NOTIFY_SUCCESSFUL_NON_AUTOPAY_FALLBACK: Спасибо за оплату, ваша подписка успешно продлена! 😉
 
 #
 # Кнопки

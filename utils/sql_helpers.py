@@ -152,6 +152,23 @@ async def has_payment_for_user_by_tg_id(
     return result.scalars().first() is not None
 
 
+async def get_latest_successful_payment_by_tg_id(
+    session: AsyncSession, telegram_id: int
+) -> Optional[YkPayment]:
+    result = await session.execute(
+        select(YkPayment)
+        .join(User, User.id == YkPayment.user_id)
+        .where(User.telegram_id == telegram_id, YkPayment.status == "succeeded")
+        .order_by(
+            func.coalesce(YkPayment.captured_at, YkPayment.created_at).desc(),
+            YkPayment.id.desc(),
+        )
+        .limit(1)
+    )
+
+    return result.scalar_one_or_none()
+
+
 async def has_saved_notification(
     session: AsyncSession, telegram_id: int, notification_type: str
 ) -> bool:
