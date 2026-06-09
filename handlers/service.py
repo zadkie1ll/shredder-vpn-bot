@@ -601,6 +601,35 @@ def format_admin_user(user: User | None) -> str:
     return f"<code>{user.telegram_id}</code> ({username})"
 
 
+def get_referral_type_display_name(referral_type: ReferralType | str | None) -> str:
+    names = {
+        ReferralType.STANDARD.value: "Стандартная",
+        ReferralType.ONLY_REGISTRATIONS.value: "Только регистрации",
+        ReferralType.ALL_PAYMENTS_PERCENTAGE.value: "Процент со всех оплат",
+        ReferralType.SALES_PURCHASE.value: "Бонус по купленному тарифу",
+    }
+    value = (
+        referral_type.value
+        if isinstance(referral_type, ReferralType)
+        else referral_type
+    )
+    return names.get(value, "Не указан")
+
+
+def get_referral_bonus_type_display_name(
+    bonus_type: ReferralBonusType | str,
+) -> str:
+    names = {
+        ReferralBonusType.REGISTRATION.value: "За регистрацию",
+        ReferralBonusType.TRAFFIC.value: "За трафик",
+        ReferralBonusType.PURCHASE.value: "За покупку",
+    }
+    value = (
+        bonus_type.value if isinstance(bonus_type, ReferralBonusType) else bonus_type
+    )
+    return names.get(value, str(value))
+
+
 @service_router.message(F.text.startswith("/ref-report"), IsAdmin())
 async def __on_referral_report_requested(
     message: Message,
@@ -790,7 +819,9 @@ def generate_referral_report_messages(
     return split_message("\n".join(lines))
 
 
-@service_router.message(F.text.startswith("/refs"), IsAdmin())
+@service_router.message(
+    F.text.startswith("/refs") | F.text.startswith("/ref-stats"), IsAdmin()
+)
 async def __on_user_referrals_requested(
     message: Message,
     session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
@@ -800,7 +831,7 @@ async def __on_user_referrals_requested(
     if not args:
         await message.answer(
             "❌ Введите Telegram ID пользователя.\n"
-            "Пример: <code>/refs 123456789</code>"
+            "Пример: <code>/ref-stats 123456789</code>"
         )
         return
 
@@ -810,7 +841,7 @@ async def __on_user_referrals_requested(
         await message.answer("❌ Telegram ID должен быть числом.")
         return
 
-    processing_msg = await message.answer("🔄 Собираем список приглашенных...")
+    processing_msg = await message.answer("🔄 Собираем реферальную статистику...")
 
     try:
         async with tx(session_maker) as session:
@@ -1264,10 +1295,27 @@ async def get_user_referrals_data(session, target_tg_id: int) -> dict:
     if referrer is None:
         return {
             "referrer": None,
+            "invited_by": None,
             "referrals": [],
             "paid_count": 0,
+            "payments_count": 0,
+            "payments_sum": 0,
             "bonus_days": 0,
+            "bonus_stats": {},
+            "referral_type_stats": {},
+            "tariff_stats": {},
+            "link": None,
         }
+
+    invited_by = None
+    if referrer.referred_by_id is not None:
+        invited_by = await session.scalar(
+            select(User).where(User.id == referrer.referred_by_id)
+        )
+
+    link = await session.scalar(
+        select(UniqueReferralLink).where(UniqueReferralLink.user_id == referrer.id)
+    )
 
     referrals_result = await session.execute(
         select(User)
@@ -1280,6 +1328,8 @@ async def get_user_referrals_data(session, target_tg_id: int) -> dict:
     first_seen_by_user = {}
     paid_by_user = defaultdict(lambda: {"count": 0, "sum": 0})
     bonus_days_by_referral = defaultdict(int)
+    bonus_stats = defaultdict(int)
+    tariff_stats = defaultdict(lambda: {"payments_count": 0, "payments_sum": 0})
 
     if referral_ids:
         first_seen_result = await session.execute(
@@ -1314,9 +1364,34 @@ async def get_user_referrals_data(session, target_tg_id: int) -> dict:
                 "sum": payment_sum or 0,
             }
 
+        tariff_stats_result = await session.execute(
+            select(
+                YkPayment.subscription_period,
+                func.count(YkPayment.id),
+                func.coalesce(func.sum(YkPayment.amount), 0),
+            )
+            .where(
+                and_(
+                    YkPayment.status == "succeeded",
+                    YkPayment.user_id.in_(referral_ids),
+                )
+            )
+            .group_by(YkPayment.subscription_period)
+        )
+        for (
+            subscription_period,
+            payment_count,
+            payment_sum,
+        ) in tariff_stats_result.all():
+            tariff_stats[get_tariff_display_name(subscription_period)] = {
+                "payments_count": payment_count or 0,
+                "payments_sum": payment_sum or 0,
+            }
+
         bonuses_result = await session.execute(
             select(
                 ReferralBonus.referral_id,
+                ReferralBonus.bonus_type,
                 func.coalesce(func.sum(ReferralBonus.days_added), 0),
             )
             .where(
@@ -1325,14 +1400,19 @@ async def get_user_referrals_data(session, target_tg_id: int) -> dict:
                     ReferralBonus.referral_id.in_(referral_ids),
                 )
             )
-            .group_by(ReferralBonus.referral_id)
+            .group_by(ReferralBonus.referral_id, ReferralBonus.bonus_type)
         )
-        for referral_id, bonus_days in bonuses_result.all():
-            bonus_days_by_referral[referral_id] = bonus_days or 0
+        for referral_id, bonus_type, bonus_days in bonuses_result.all():
+            days = bonus_days or 0
+            bonus_days_by_referral[referral_id] += days
+            bonus_stats[get_referral_bonus_type_display_name(bonus_type)] += days
 
     referral_rows = []
+    referral_type_stats = defaultdict(int)
     for referral in referrals:
         payments = paid_by_user[referral.id]
+        referral_type_name = get_referral_type_display_name(referral.referral_type)
+        referral_type_stats[referral_type_name] += 1
         referral_rows.append(
             {
                 "user": referral,
@@ -1340,6 +1420,7 @@ async def get_user_referrals_data(session, target_tg_id: int) -> dict:
                 "payments_count": payments["count"],
                 "payments_sum": payments["sum"],
                 "bonus_days": bonus_days_by_referral[referral.id],
+                "referral_type": referral_type_name,
             }
         )
 
@@ -1350,9 +1431,16 @@ async def get_user_referrals_data(session, target_tg_id: int) -> dict:
 
     return {
         "referrer": referrer,
+        "invited_by": invited_by,
         "referrals": referral_rows,
         "paid_count": sum(1 for row in referral_rows if row["payments_count"] > 0),
+        "payments_count": sum(row["payments_count"] for row in referral_rows),
+        "payments_sum": sum(row["payments_sum"] for row in referral_rows),
         "bonus_days": sum(row["bonus_days"] for row in referral_rows),
+        "bonus_stats": dict(bonus_stats),
+        "referral_type_stats": dict(referral_type_stats),
+        "tariff_stats": dict(tariff_stats),
+        "link": link,
     }
 
 
@@ -1365,16 +1453,72 @@ def generate_user_referrals_messages(report_data: dict) -> list[str]:
     referral_rows = report_data["referrals"]
     paid_count = report_data["paid_count"]
     bonus_days = report_data["bonus_days"]
+    conversion = (paid_count / len(referral_rows) * 100) if referral_rows else 0
+    invited_by = report_data.get("invited_by")
+    link = report_data.get("link")
+    own_referral_type = get_referral_type_display_name(
+        getattr(referrer, "referral_type", None)
+    )
+    referral_username = getattr(referrer, "username", None) or str(
+        referrer.telegram_id
+    )
 
     lines = [
-        f"🤝 <b>ПРИГЛАШЕННЫЕ ПОЛЬЗОВАТЕЛИ</b>",
-        f"Кто приглашал: {format_admin_user(referrer)}",
+        "🤝 <b>РЕФЕРАЛЬНАЯ СТАТИСТИКА</b>",
+        f"Пользователь: {format_admin_user(referrer)}",
+        f"Сам приглашен: {format_admin_user(invited_by) if invited_by else 'нет'}",
+        f"Его тип входа: <b>{escape(own_referral_type)}</b>",
+        (
+            f"Уникальная ссылка: <b>выпущена {link.created_at:%d.%m.%Y}</b>"
+            if link is not None
+            else "Уникальная ссылка: <b>не выпускалась</b>"
+        ),
         "",
         f"Всего приглашено: <b>{len(referral_rows)}</b>",
-        f"Перешли на платный: <b>{paid_count}</b>",
+        f"Перешли на платный: <b>{paid_count}</b> ({conversion:.1f}%)",
+        f"Успешных оплат: <b>{report_data.get('payments_count', 0)}</b>",
+        f"Сумма оплат рефералов: <b>{report_data.get('payments_sum', 0)} ₽</b>",
         f"Начислено бонусов: <b>{bonus_days} дн.</b>",
         "",
     ]
+
+    if link is not None:
+        lines.insert(
+            5,
+            f"Ссылка: <code>{TELEGRAM_BOT_URL}?start=s{escape(referral_username)}</code>",
+        )
+
+    referral_type_stats = report_data.get("referral_type_stats", {})
+    if referral_type_stats:
+        lines.append("<b>Типы реферальной программы:</b>")
+        for referral_type, count in sorted(
+            referral_type_stats.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        ):
+            lines.append(f"- {escape(referral_type)}: <b>{count}</b>")
+        lines.append("")
+
+    tariff_stats = report_data.get("tariff_stats", {})
+    if tariff_stats:
+        lines.append("<b>Оплаты по тарифам:</b>")
+        for tariff_name, stats in sorted(
+            tariff_stats.items(),
+            key=lambda item: get_tariff_order(item[0]),
+        ):
+            lines.append(
+                f"- {escape(tariff_name)}: "
+                f"<b>{stats['payments_count']}</b> / "
+                f"<b>{stats['payments_sum']} ₽</b>"
+            )
+        lines.append("")
+
+    bonus_stats = report_data.get("bonus_stats", {})
+    if bonus_stats:
+        lines.append("<b>Начисленные бонусы:</b>")
+        for bonus_type, days in bonus_stats.items():
+            lines.append(f"- {escape(bonus_type)}: <b>{days} дн.</b>")
+        lines.append("")
 
     if not referral_rows:
         lines.append("<i>Этот пользователь пока никого не пригласил.</i>")
@@ -1397,6 +1541,7 @@ def generate_user_referrals_messages(report_data: dict) -> list[str]:
         lines.append(
             f"{index}. {format_admin_user(referral)} | "
             f"{first_seen_text} | "
+            f"{escape(row.get('referral_type', 'Не указан'))} | "
             f"{paid_text} | "
             f"бонус {row['bonus_days']} дн."
         )
