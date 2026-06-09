@@ -75,6 +75,10 @@ NOTIFICATION_CONFIG = {
 }
 
 
+def has_telegram_recipient(message: NotificateUserMessage) -> bool:
+    return message.telegram_id is not None and message.telegram_id > 0
+
+
 def format_trial_promo_text(text: str) -> str:
     if "{}" not in text:
         return text
@@ -135,6 +139,13 @@ async def process_notification(
     session_maker: async_sessionmaker,
     message: NotificateUserMessage,
 ) -> None:
+    if not has_telegram_recipient(message):
+        logging.info(
+            "Skipping notification '%s' because no Telegram account is linked",
+            message.notification_type,
+        )
+        return
+
     telegram_id = message.telegram_id
     notification_type = message.notification_type
 
@@ -277,6 +288,13 @@ async def listen_notifications(
                 logging.debug(
                     f"received message for user {message.telegram_id} with notification type '{message.notification_type}'"
                 )
+
+                if not has_telegram_recipient(message):
+                    logging.info(
+                        "Skipping notification '%s' because no Telegram account is linked",
+                        message.notification_type,
+                    )
+                    continue
 
                 if message.notification_type == "purchase-success-autopay":
                     logging.debug(
