@@ -300,4 +300,5 @@ async def listen_notifications(
             await asyncio.sleep(random.uniform(0.5, 1))
 
         except Exception:
-            logging.exception(f"notifying error")
+            logging.exception("notifying error")
+            await asyncio.sleep(1)

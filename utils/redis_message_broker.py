@@ -3,6 +3,7 @@ import logging
 
 from utils.config import Config
 from redis.asyncio import Redis
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from typing import Type
 from pydantic import ValidationError
 
@@ -49,8 +50,15 @@ class RedisMessageBroker:
                 f"failed to push message to Redis, content: {message.model_dump_json()}"
             )
 
-    async def pop_message(self, timeout: int) -> MessageUnion:
-        job = await self.__redis.blpop(self.__config.redis_queue_name, timeout=timeout)
+    async def pop_message(self, timeout: int) -> MessageUnion | None:
+        try:
+            job = await self.__redis.blpop(
+                self.__config.redis_queue_name,
+                timeout=timeout,
+            )
+        except RedisTimeoutError:
+            logging.debug("redis queue wait timed out without a message")
+            return None
 
         if job is None:
             logging.debug("no messages in a queue, waiting...")
