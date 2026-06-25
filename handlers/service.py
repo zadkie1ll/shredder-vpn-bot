@@ -264,6 +264,208 @@ def register_first_paid_tariff(
 
 
 @service_router.message(
+    F.text.startswith("/trial-conversion-report")
+    | F.text.startswith("/trial-report"),
+    IsAdmin(),
+)
+async def __on_trial_conversion_report_requested(
+    message: Message,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    args = message.text.split()[1:] if message.text else []
+
+    if len(args) < 2:
+        await message.answer(
+            "❌ Неверный формат команды.\n"
+            "Используйте: "
+            "<code>/trial-conversion-report 01.05.2026 31.05.2026</code>"
+        )
+        return
+
+    try:
+        start_date = parse_report_date(args[0])
+        end_date = parse_report_date(args[1])
+
+        if start_date > end_date:
+            await message.answer("❌ Начальная дата не может быть больше конечной даты")
+            return
+    except ValueError:
+        await message.answer(
+            "❌ Неверный формат даты. Используйте формат DD.MM.YYYY"
+        )
+        return
+
+    processing_msg = await message.answer(
+        "🔄 Собираем конверсию после тарифа на 3 дня..."
+    )
+
+    try:
+        async with tx(session_maker) as session:
+            report_data = await get_trial_conversion_report_data(
+                session=session,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+        await processing_msg.delete()
+
+        for report_message in generate_trial_conversion_report_messages(
+            report_data=report_data,
+            start_date=start_date,
+            end_date=end_date,
+        ):
+            await message.answer(text=report_message)
+            await asyncio.sleep(0.5)
+    except Exception as e:
+        await processing_msg.delete()
+        await message.answer(f"❌ Ошибка при формировании отчета: {str(e)}")
+        logging.exception("Error generating trial conversion report")
+
+
+async def get_trial_conversion_report_data(
+    session,
+    start_date: date,
+    end_date: date,
+) -> dict:
+    """Finds the first paid tariff after a three-day purchase in the period."""
+    start_datetime = datetime.combine(start_date, time.min)
+    end_datetime = datetime.combine(end_date, time.max)
+
+    trial_payments = (
+        select(
+            YkPayment.user_id.label("user_id"),
+            func.min(YkPayment.created_at).label("trial_purchased_at"),
+        )
+        .where(
+            and_(
+                YkPayment.status == "succeeded",
+                YkPayment.subscription_period == "threedays",
+                YkPayment.created_at >= start_datetime,
+                YkPayment.created_at <= end_datetime,
+            )
+        )
+        .group_by(YkPayment.user_id)
+        .subquery()
+    )
+
+    subsequent_payment = aliased(YkPayment)
+    payments_result = await session.execute(
+        select(
+            trial_payments.c.user_id,
+            trial_payments.c.trial_purchased_at,
+            User.telegram_id,
+            User.telegram_username,
+            subsequent_payment.subscription_period,
+            subsequent_payment.created_at,
+            subsequent_payment.amount,
+        )
+        .join(User, User.id == trial_payments.c.user_id)
+        .outerjoin(
+            subsequent_payment,
+            and_(
+                subsequent_payment.user_id == trial_payments.c.user_id,
+                subsequent_payment.status == "succeeded",
+                subsequent_payment.subscription_period != "threedays",
+                subsequent_payment.created_at
+                > trial_payments.c.trial_purchased_at,
+            ),
+        )
+        .order_by(
+            trial_payments.c.trial_purchased_at.asc(),
+            subsequent_payment.created_at.asc(),
+        )
+    )
+
+    trial_users = {}
+    for row in payments_result.all():
+        user = trial_users.setdefault(
+            row.user_id,
+            {
+                "telegram_id": row.telegram_id,
+                "telegram_username": row.telegram_username,
+                "trial_purchased_at": row.trial_purchased_at,
+                "next_payment_at": None,
+                "next_tariff": None,
+                "next_payment_amount": None,
+            },
+        )
+
+        if row.created_at is not None and user["next_payment_at"] is None:
+            user["next_payment_at"] = row.created_at
+            user["next_tariff"] = row.subscription_period
+            user["next_payment_amount"] = row.amount
+
+    converted_users = [
+        user for user in trial_users.values() if user["next_payment_at"] is not None
+    ]
+    converted_users.sort(key=lambda user: user["next_payment_at"])
+
+    tariff_stats = defaultdict(int)
+    for user in converted_users:
+        tariff_stats[get_tariff_display_name(user["next_tariff"])] += 1
+
+    return {
+        "trial_users_count": len(trial_users),
+        "converted_users": converted_users,
+        "tariff_stats": dict(tariff_stats),
+    }
+
+
+def generate_trial_conversion_report_messages(
+    report_data: dict,
+    start_date: date,
+    end_date: date,
+) -> list[str]:
+    trial_users_count = report_data["trial_users_count"]
+    converted_users = report_data["converted_users"]
+    converted_count = len(converted_users)
+    conversion_rate = (
+        converted_count / trial_users_count * 100 if trial_users_count else 0
+    )
+
+    summary_lines = [
+        (
+            "🔁 <b>КОНВЕРСИЯ ПОСЛЕ ТАРИФА НА 3 ДНЯ</b>\n"
+            f"Период покупки тарифа: "
+            f"<b>{start_date:%d.%m.%Y}-{end_date:%d.%m.%Y}</b>"
+        ),
+        "",
+        f"Купили тариф на 3 дня: <b>{trial_users_count}</b>",
+        f"Купили другой тариф позже: <b>{converted_count}</b>",
+        f"Конверсия: <b>{conversion_rate:.1f}%</b>",
+    ]
+
+    tariff_stats = report_data.get("tariff_stats", {})
+    if tariff_stats:
+        summary_lines.extend(["", "<b>Первый следующий тариф:</b>"])
+        for tariff_name, count in sorted(
+            tariff_stats.items(),
+            key=lambda item: get_tariff_order(item[0]),
+        ):
+            summary_lines.append(f"- {escape(tariff_name)}: <b>{count}</b>")
+
+    if not converted_users:
+        summary_lines.extend(["", "<i>Конверсий за выбранный период нет.</i>"])
+        return ["\n".join(summary_lines)]
+
+    detail_lines = ["👥 <b>СКОНВЕРТИРОВАВШИЕСЯ ПОЛЬЗОВАТЕЛИ</b>", ""]
+    for index, user in enumerate(converted_users, 1):
+        telegram_username = user.get("telegram_username")
+        username = (
+            f"@{escape(telegram_username)}" if telegram_username else "@unknown"
+        )
+        detail_lines.append(
+            f"{index}. <code>{user['telegram_id']}</code> ({username})\n"
+            f"   3 дня: {user['trial_purchased_at']:%d.%m.%Y %H:%M}\n"
+            f"   затем: {escape(get_tariff_display_name(user['next_tariff']))}, "
+            f"{user['next_payment_amount']} ₽, "
+            f"{user['next_payment_at']:%d.%m.%Y %H:%M}"
+        )
+
+    return ["\n".join(summary_lines)] + split_message("\n".join(detail_lines))
+
+
+@service_router.message(
     F.text.startswith("/table-report") | F.text.startswith("/sheet-report"), IsAdmin()
 )
 async def __on_table_report_requested(
