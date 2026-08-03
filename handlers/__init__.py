@@ -5,6 +5,7 @@ from .questions import questions_router
 from .tariffs import tariffs_router
 from .cancel_subscription import cancel_subscription_router
 from .service import service_router
+from .action_control_feedback import action_control_feedback_router
 from .feedback_campaigns import feedback_campaigns_router
 
 handlers_router = Router()
@@ -17,5 +18,6 @@ handlers_router.include_routers(
     tariffs_router,
     cancel_subscription_router,
     service_router,
+    action_control_feedback_router,
     feedback_campaigns_router,
 )
