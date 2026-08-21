@@ -46,7 +46,6 @@ from common.models.tariff import SixMonthsTariff
 from common.models.tariff import OneYearTariff
 from common.rwms_client import RwmsClient
 from utils.public_resources import TELEGRAM_BOT_URL
-from utils.public_resources import TELEGRAM_SUPPORT_URL
 
 from utils.rwms_helpers import update_user
 import utils.referral_rewards as referral_rewards
@@ -57,20 +56,71 @@ from utils.sql_helpers import get_all_recurrents
 
 service_router = Router()
 
-CLIENT_UPDATE_BROADCAST_TEXT = """<b>Важное объявление 📣</b>
+BROADCAST_USAGE = (
+    "Формат:\n"
+    "<code>/sendmsg текст рассылки</code>\n\n"
+    "Кнопки можно добавить отдельными строками:\n"
+    "<code>button: Написать в поддержку | https://t.me/ShredderSUPPORT</code>\n\n"
+    "Старый формат тоже работает:\n"
+    "<code>/sendmsg текст | кнопка | url</code>\n\n"
+    "Можно отправить команду подписью к фото."
+)
 
-Недавно вышло обновление Happ для Android – и на этом фоне хотим напомнить: обновляйте свои клиенты вовремя (Happ и INCY)
 
-Часто причина того, что VPN работает нестабильно – именно устаревшая версия приложения, а не что-то на нашей стороне
+def strip_broadcast_command(source_text: str) -> str:
+    first, _, rest = source_text.partition(" ")
+    if first.startswith("/sendmsg"):
+        return rest.strip()
+    return source_text.replace("/sendmsg", "", 1).strip()
 
-Проверьте, стоит ли у вас последняя версия – если давно не заходили в Google Play, самое время 🔄
 
-Если после обновления всё равно что-то не так – пишите, разберёмся 🤝"""
+def parse_broadcast_button_spec(spec: str) -> tuple[str, str]:
+    if "|" not in spec:
+        raise ValueError("Кнопка должна быть в формате: button: текст | url")
+
+    text, url = [part.strip() for part in spec.split("|", 1)]
+    if not text or not url:
+        raise ValueError("В кнопке должны быть заполнены текст и url")
+
+    return text, url
 
 
-def build_support_keyboard():
+def parse_broadcast_payload(raw_text: str) -> tuple[str, list[tuple[str, str]]]:
+    message_lines = []
+    buttons = []
+
+    for line in raw_text.splitlines():
+        stripped = line.strip()
+        lower = stripped.lower()
+        if lower.startswith("button:") or lower.startswith("кнопка:"):
+            _, _, spec = stripped.partition(":")
+            buttons.append(parse_broadcast_button_spec(spec.strip()))
+            continue
+
+        message_lines.append(line)
+
+    msg_text = "\n".join(message_lines).strip()
+
+    if not buttons and "|" in msg_text:
+        parts = [part.strip() for part in msg_text.split("|")]
+        msg_text = parts[0]
+        for index in range(1, len(parts), 2):
+            if index + 1 < len(parts):
+                buttons.append((parts[index], parts[index + 1]))
+
+    if not msg_text:
+        raise ValueError("Текст рассылки пустой")
+
+    return msg_text, buttons
+
+
+def build_broadcast_keyboard(buttons: list[tuple[str, str]]):
+    if not buttons:
+        return None
+
     builder = InlineKeyboardBuilder()
-    builder.button(text="Написать в поддержку", url=TELEGRAM_SUPPORT_URL)
+    for text, url in buttons:
+        builder.row(InlineKeyboardButton(text=text, url=url))
     return builder.as_markup()
 
 
@@ -133,64 +183,29 @@ async def __on_extend_by_tgid(
             return
 
 
-@service_router.message(
-    Command("client_update_broadcast", "clients_update_broadcast"),
-    IsAdmin(),
-)
-async def __on_client_update_broadcast_preview(message: Message, state: FSMContext):
-    await state.update_data(
-        msg_text=CLIENT_UPDATE_BROADCAST_TEXT,
-        photo_id=None,
-        reply_markup=build_support_keyboard(),
-    )
-
-    await message.answer("<b>⚠️ ПРЕДПРОСМОТР СООБЩЕНИЯ:</b>", parse_mode="HTML")
-    await message.answer(
-        text=CLIENT_UPDATE_BROADCAST_TEXT,
-        reply_markup=build_support_keyboard(),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-    )
-
-    confirm_kb = InlineKeyboardBuilder()
-    confirm_kb.button(
-        text="✅ Подтвердить и отправить", callback_data="broadcast_confirm"
-    )
-    confirm_kb.button(text="❌ Отмена", callback_data="broadcast_cancel")
-
-    await message.answer(
-        "Все верно? После подтверждения объявление уйдет всем пользователям.",
-        reply_markup=confirm_kb.as_markup(),
-    )
-    await state.set_state(BroadcastStates.confirm)
-
-
 # --- ЭТАП 1: ПРЕДПРОСМОТР ---
 @service_router.message(
     F.text.startswith("/sendmsg") | F.caption.startswith("/sendmsg"), IsAdmin()
 )
 async def __on_send_message_preview(message: Message, state: FSMContext):
     source_text = message.text or message.caption
-    raw_text = source_text.replace("/sendmsg", "").strip()
+    raw_text = strip_broadcast_command(source_text)
 
     if not raw_text:
-        return await message.answer("Формат: текст | кнопка | url. Можно фото.")
+        return await message.answer(BROADCAST_USAGE)
 
-    parts = [p.strip() for p in raw_text.split("|")]
-    msg_text = parts[0]
+    try:
+        msg_text, buttons = parse_broadcast_payload(raw_text)
+    except ValueError as exc:
+        return await message.answer(f"❌ {escape(str(exc))}\n\n{BROADCAST_USAGE}")
 
-    # Собираем кнопки для превью
-    builder = InlineKeyboardBuilder()
-    if len(parts) >= 3:
-        for i in range(1, len(parts), 2):
-            if i + 1 < len(parts):
-                builder.row(InlineKeyboardButton(text=parts[i], url=parts[i + 1]))
+    reply_markup = build_broadcast_keyboard(buttons)
 
     photo_id = message.photo[-1].file_id if message.photo else None
 
     # Сохраняем данные во временное хранилище бота
     await state.update_data(
-        msg_text=msg_text, photo_id=photo_id, reply_markup=builder.as_markup()
+        msg_text=msg_text, photo_id=photo_id, reply_markup=reply_markup
     )
 
     # Показываем админу превью
@@ -200,14 +215,14 @@ async def __on_send_message_preview(message: Message, state: FSMContext):
         await message.answer_photo(
             photo=photo_id,
             caption=msg_text,
-            reply_markup=builder.as_markup(),
+            reply_markup=reply_markup,
             parse_mode="HTML",
             disable_web_page_preview=True,
         )
     else:
         await message.answer(
             text=msg_text,
-            reply_markup=builder.as_markup(),
+            reply_markup=reply_markup,
             parse_mode="HTML",
             disable_web_page_preview=True,
         )
