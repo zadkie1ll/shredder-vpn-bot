@@ -10,6 +10,7 @@ from html import escape
 
 from aiogram import F
 from aiogram import Router
+from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.types import CallbackQuery
 from aiogram.types import InlineKeyboardButton
@@ -45,6 +46,7 @@ from common.models.tariff import SixMonthsTariff
 from common.models.tariff import OneYearTariff
 from common.rwms_client import RwmsClient
 from utils.public_resources import TELEGRAM_BOT_URL
+from utils.public_resources import TELEGRAM_SUPPORT_URL
 
 from utils.rwms_helpers import update_user
 import utils.referral_rewards as referral_rewards
@@ -54,6 +56,22 @@ from utils.sql_helpers import extend_user_subscription_by_tg_id
 from utils.sql_helpers import get_all_recurrents
 
 service_router = Router()
+
+CLIENT_UPDATE_BROADCAST_TEXT = """<b>Важное объявление 📣</b>
+
+Недавно вышло обновление Happ для Android – и на этом фоне хотим напомнить: обновляйте свои клиенты вовремя (Happ и INCY)
+
+Часто причина того, что VPN работает нестабильно – именно устаревшая версия приложения, а не что-то на нашей стороне
+
+Проверьте, стоит ли у вас последняя версия – если давно не заходили в Google Play, самое время 🔄
+
+Если после обновления всё равно что-то не так – пишите, разберёмся 🤝"""
+
+
+def build_support_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Написать в поддержку", url=TELEGRAM_SUPPORT_URL)
+    return builder.as_markup()
 
 
 @service_router.message(F.text.startswith("/extend-by-tgid"), IsAdmin())
@@ -113,6 +131,38 @@ async def __on_extend_by_tgid(
                 f"Подписка пользователя {telegram_id} успешно продлена на {interval.days} дней"
             )
             return
+
+
+@service_router.message(
+    Command("client_update_broadcast", "clients_update_broadcast"),
+    IsAdmin(),
+)
+async def __on_client_update_broadcast_preview(message: Message, state: FSMContext):
+    await state.update_data(
+        msg_text=CLIENT_UPDATE_BROADCAST_TEXT,
+        photo_id=None,
+        reply_markup=build_support_keyboard(),
+    )
+
+    await message.answer("<b>⚠️ ПРЕДПРОСМОТР СООБЩЕНИЯ:</b>", parse_mode="HTML")
+    await message.answer(
+        text=CLIENT_UPDATE_BROADCAST_TEXT,
+        reply_markup=build_support_keyboard(),
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
+
+    confirm_kb = InlineKeyboardBuilder()
+    confirm_kb.button(
+        text="✅ Подтвердить и отправить", callback_data="broadcast_confirm"
+    )
+    confirm_kb.button(text="❌ Отмена", callback_data="broadcast_cancel")
+
+    await message.answer(
+        "Все верно? После подтверждения объявление уйдет всем пользователям.",
+        reply_markup=confirm_kb.as_markup(),
+    )
+    await state.set_state(BroadcastStates.confirm)
 
 
 # --- ЭТАП 1: ПРЕДПРОСМОТР ---
