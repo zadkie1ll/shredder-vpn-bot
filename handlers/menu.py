@@ -531,6 +531,7 @@ async def __invite_friend_button_clicked(
         img.save(bio, "PNG")
         bio.seek(0)
 
+        encoded_referral_url = quote(referral_url, safe="")
         encoded_share_text = quote(
             ts.get(
                 "ru",
@@ -538,9 +539,12 @@ async def __invite_friend_button_clicked(
                 config.referral_bonus_days,
                 config.trial_period_days,
                 referral_url,
-            )
+            ),
+            safe="",
         )
-        share_url = f"https://t.me/share/url?url={encoded_share_text}"
+        share_url = (
+            f"https://t.me/share/url?url={encoded_referral_url}&text={encoded_share_text}"
+        )
 
         builder = InlineKeyboardBuilder()
         builder.button(
