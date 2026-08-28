@@ -38,6 +38,11 @@ MI_VPN_BOT_POSTGRES_USER = "MI_VPN_BOT_POSTGRES_USER"
 MI_VPN_BOT_POSTGRES_PASSWORD = "MI_VPN_BOT_POSTGRES_PASSWORD"
 MI_VPN_BOT_POSTGRES_DB = "MI_VPN_BOT_POSTGRES_DB"
 
+# vpn-bot-admin (живые тексты шаблонов + события отправки, опционально)
+ADMIN_API_URL = "ADMIN_API_URL"
+ADMIN_API_KEY = "ADMIN_API_KEY"
+ADMIN_TEMPLATES_REFRESH_INTERVAL_SECONDS = "ADMIN_TEMPLATES_REFRESH_INTERVAL_SECONDS"
+
 
 class Config:
     def __init__(self):
@@ -129,6 +134,13 @@ class Config:
             MI_VPN_BOT_POSTGRES_PASSWORD
         )
         self.pg_db: str = self.__read_required_str_env(MI_VPN_BOT_POSTGRES_DB)
+
+        # vpn-bot-admin envs (опционально — без них интеграция просто выключена)
+        self.admin_api_url: str | None = os.getenv(ADMIN_API_URL) or None
+        self.admin_api_key: str | None = os.getenv(ADMIN_API_KEY) or None
+        self.admin_templates_refresh_interval_seconds: int = self.__read_int_env(
+            ADMIN_TEMPLATES_REFRESH_INTERVAL_SECONDS, "60"
+        )
 
     def __read_int_env(self, name: str, default) -> int:
         value = os.getenv(name, default)

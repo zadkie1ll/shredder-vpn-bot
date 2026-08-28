@@ -16,6 +16,7 @@ from handlers import handlers_router
 from handlers.technical_work import technical_work_router
 from handlers.traffic_monitor import traffic_monitor_router
 from utils.notifications import listen_notifications
+from utils.translator import admin_templates_sync_loop
 from utils.redis_message_broker import RedisMessageBroker
 from middlewares.throttle import ThrottleMiddleware
 from middlewares.global_error import GlobalErrorMiddleware
@@ -87,6 +88,13 @@ async def main(config: Config) -> None:
                 session_maker=session_maker,
                 rwms_client=rwms_client,
                 config=config,
+            )
+        )
+        asyncio.create_task(
+            admin_templates_sync_loop(
+                base_url=config.admin_api_url,
+                api_key=config.admin_api_key,
+                interval_seconds=config.admin_templates_refresh_interval_seconds,
             )
         )
 
