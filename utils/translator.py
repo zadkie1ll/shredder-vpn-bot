@@ -86,20 +86,48 @@ class Translator:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        loop.create_task(self._send_usage_event(key))
+        loop.create_task(self.send_event(key))
 
-    async def _send_usage_event(self, key: str) -> None:
+    async def send_event(self, event_type: str, telegram_user_id: int | None = None) -> int | None:
+        """Шлёт событие в vpn-bot-admin. Возвращает id события (пригодится для
+        последующего convert_event), либо None если интеграция выключена или
+        запрос не удался — вызывающий код не должен падать в этом случае."""
+        if not self._admin_base_url or not self._admin_api_key:
+            return None
+        payload: dict = {"event_type": event_type}
+        if telegram_user_id is not None:
+            payload["telegram_user_id"] = telegram_user_id
+        try:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as session:
+                async with session.post(
+                    f"{self._admin_base_url.rstrip('/')}/api/ingest/events",
+                    headers={"X-API-Key": self._admin_api_key},
+                    json=payload,
+                ) as response:
+                    if response.status != 200:
+                        return None
+                    data = await response.json()
+                    return data.get("id")
+        except Exception:
+            logging.debug("translator: failed to send event %s", event_type, exc_info=True)
+            return None
+
+    async def convert_event(self, event_id: int) -> None:
+        """Помечает ранее отправленное событие как сконвертированное (юзер купил)."""
+        if not self._admin_base_url or not self._admin_api_key:
+            return
         try:
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=5)
             ) as session:
                 await session.post(
-                    f"{self._admin_base_url.rstrip('/')}/api/ingest/events",
+                    f"{self._admin_base_url.rstrip('/')}/api/ingest/events/{event_id}/convert",
                     headers={"X-API-Key": self._admin_api_key},
-                    json={"event_type": key},
                 )
         except Exception:
-            logging.debug("translator: failed to send usage event for %s", key, exc_info=True)
+            logging.debug("translator: failed to convert event %s", event_id, exc_info=True)
 
     async def push_missing_to_admin(self, lang: str = "ru") -> None:
         """Заводит в vpn-bot-admin шаблоны, которых там ещё нет — источник это

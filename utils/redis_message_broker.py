@@ -50,6 +50,36 @@ class RedisMessageBroker:
                 f"failed to push message to Redis, content: {message.model_dump_json()}"
             )
 
+    async def remember_pending_conversion(
+        self, telegram_id: int, event_id: int, ttl_seconds: int
+    ) -> None:
+        """Запоминает, что этому юзеру отправлено 'предложение купить' (event_id
+        в vpn-bot-admin) — чтобы потом, если он оплатит, отметить конверсию.
+        TTL нужен, чтобы не копить мусор для юзеров, которые так и не купили."""
+        try:
+            await self.__redis.set(
+                f"admin-pending-conversion:{telegram_id}", str(event_id), ex=ttl_seconds
+            )
+        except Exception:
+            logging.exception(
+                "failed to remember pending conversion for telegram_id=%s", telegram_id
+            )
+
+    async def pop_pending_conversion(self, telegram_id: int) -> int | None:
+        """Забирает и удаляет запомненное 'предложение купить' для юзера, если есть."""
+        key = f"admin-pending-conversion:{telegram_id}"
+        try:
+            value = await self.__redis.get(key)
+            if value is None:
+                return None
+            await self.__redis.delete(key)
+            return int(value)
+        except Exception:
+            logging.exception(
+                "failed to pop pending conversion for telegram_id=%s", telegram_id
+            )
+            return None
+
     async def pop_message(self, timeout: int) -> MessageUnion | None:
         try:
             job = await self.__redis.blpop(
