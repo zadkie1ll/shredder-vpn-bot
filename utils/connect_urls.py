@@ -2,6 +2,10 @@ def happ_url() -> str:
     return "happ://add/"
 
 
+def incy_import_url() -> str:
+    return "incy://import/"
+
+
 def v2raytun_url() -> str:
     return "v2rayTun://import/"
 

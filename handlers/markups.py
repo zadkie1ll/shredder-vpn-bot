@@ -162,3 +162,21 @@ def create_one_click_connect_keyboard(url: str) -> InlineKeyboardMarkup:
     )
     keyboard.adjust(1)
     return keyboard.as_markup()
+
+
+def create_apps_connect_keyboard(happ_url: str, incy_url: str) -> InlineKeyboardMarkup:
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(
+        text=ts.get("ru", "ONE_CLICK_INSTALL_INCY_BUTTON"),
+        url=incy_url,
+        style="success",
+        icon_custom_emoji_id="5348239232852836489",
+    )
+    keyboard.button(
+        text=ts.get("ru", "INCY_DOESNT_WORK_BUTTON"),
+        url=happ_url,
+        style="success",
+        icon_custom_emoji_id="5348239232852836489",
+    )
+    keyboard.adjust(1, 1)
+    return keyboard.as_markup()

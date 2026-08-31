@@ -53,7 +53,7 @@ YOUR_KEY: |
   Нажмите один раз прямо на него, чтобы скопировать в буфер обмена.
 
 MY_PROFILE: |
-  Ваш ключ для белых списков — работает только в Happ 👇
+  Ваш ключ для подключения через Happ 👇
 
   <code>{}</code>
 
@@ -70,7 +70,7 @@ MY_PROFILE: |
   👉📌 Обязательно (!!) <a href="https://t.me/SHREDDER_VPN_CHANNEL_PLACEHOLDER">Подпишитесь на наш канал, чтобы быть в курсе последних новостей и розыгрышей</a>
 
 MY_PROFILE_TRAFFIC_LIMIT: |
-  Ваш ключ для белых списков — работает только в Happ 👇
+  Ваш ключ для подключения через Happ 👇
 
   <code>{}</code>
 
@@ -147,7 +147,7 @@ NO_WL_ANSWER: |
 
   — Нажмите кнопку <b>«Подключиться 🔒»</b>.
   — Выберите вашу платформу и следуйте подсказкам.
-  — Помните: ключ работает только внутри приложения <b>Happ</b>.
+  — Рекомендуем использовать приложение <b>INCY</b>. Если INCY не подойдет, используйте запасной вариант через <b>Happ</b>.
 
   Когда увидите надпись <b>«ВСЕ ЛОКАЦИИ В БЕЛОМ СПИСКЕ ❤️»</b>, значит, всё настроено верно. Можно подключаться к любой локации!
 
@@ -184,27 +184,39 @@ SUPPORT_ANSWER: |
 INSTALL_ON_ANDROID_INSTRUCTION: |
   Для подключения:
 
-  1. Скачайте <a href="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru">Happ</a> или <a href="https://github.com/FlyFrg/Happ_android_update/releases/latest/download/Happ.apk">APK-файл</a>
-  2. Нажмите на кнопку ниже, чтобы <b>Подключиться в 1 клик!</b>
+  1. Скачайте <a href="https://github.com/INCY-DEV/incy-platforms/releases/latest/download/Incy.apk">INCY для Android</a>.
+  2. Нажмите кнопку <b>«Подключиться через INCY»</b> ниже.
+
+  Если INCY не работает на вашем устройстве:
+
+  1. Установите Happ: <a href="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru">Google Play</a> или <a href="https://github.com/FlyFrg/Happ_android_update/releases/latest/download/Happ.apk">APK-файл</a>.
+  2. Нажмите кнопку <b>«Не работает INCY»</b> ниже.
 
   Если автоматическая настройка не сработала, следуйте инструкции:
   
-  1. Скопируйте ключ, нажав на него:
-  <code>{}</code>
-  2. Откройте Happ и нажмите кнопку Вставить/Из буфера.
+  1. Для INCY скопируйте этот ключ:
+  <code>{1}</code>
+  2. Для Happ скопируйте этот ключ:
+  <code>{0}</code>
   3. Выберите локацию и подключитесь.
 
 INSTALL_ON_APPLE_INSTRUCTION: |
-  Для подключения:
+  Для подключения на iOS/MacOS:
 
-  1. Скачайте <a href="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973">Happ</a> для России (<a href="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215">Happ</a> для других регионов)
-  2. Нажмите на кнопку ниже, чтобы <b>Подключиться в 1 клик!</b>
+  1. Скачайте <a href="https://apps.apple.com/ru/app/incy/id6756943388">INCY</a>.
+  2. Нажмите кнопку <b>«Подключиться через INCY»</b> ниже.
+
+  Если INCY не работает на вашем устройстве:
+
+  1. Установите <a href="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215">Happ для других регионов</a>.
+  2. Нажмите кнопку <b>«Не работает INCY»</b> ниже.
 
   Если автоматическая настройка не сработала, следуйте инструкции:
   
-  1. Скопируйте ключ, нажав на него:
-  <code>{}</code>
-  2. Откройте Happ и нажмите кнопку Вставить/Из буфера.
+  1. Для INCY скопируйте этот ключ:
+  <code>{1}</code>
+  2. Для Happ скопируйте этот ключ:
+  <code>{0}</code>
   3. Выберите локацию и подключитесь.
 
 INSTALL_ON_WINDOWS_INSTRUCTION: |
@@ -237,7 +249,8 @@ REFERRAL_PROGRAM: |
   Приглашайте друзей и получайте бонусы!
 
   За каждого приглашенного друга вы получаете:
-  — За подключение друга <b>+{} дней</b>
+  — Сразу после регистрации друга <b>+{} дня</b>
+  — Когда друг использует 100 МБ трафика <b>+{} дней</b>
   — За оплату друга тарифа на месяц и более <b>+30 дней</b>
   — Ваш друг получает <b>{} дней вместо {}</b> пробного доступа
 
@@ -250,8 +263,11 @@ REFERRAL_PROGRAM: |
 
   <i>Можете показать ваш QR Code другу.</i>
 
+NOTIFY_REFERRAL_REGISTRATION_BONUS: |
+  👋 По вашей ссылке зарегистрировался друг! Вам сразу +{} дня подписки ✨
+
 NOTIFY_REFERRAL_TRAFFIC_REACHED_BONUS: |
-  👋 Рады сообщить, что {} активными пользователями по вашей рекомендации. Спасибо, что делитесь сервисом! Вам +{} дней подписки ✨
+  👋 {} VPN по вашей рекомендации. Вам ещё +{} дней подписки ✨
 
 NOTIFY_REFERRAL_PURCHASE_BONUS_APPLIED: |
   👋 Рады сообщить, что ваш друг оплатил тариф на {} по вашей рекомендации. Спасибо, что делитесь сервисом! Вам +{} дней подписки ✨
@@ -427,6 +443,9 @@ SUPPORT_BUTTON: "Техническая поддержка"
 SAVE_RECURRENT_PAYMENT_BUTTON: Да, давайте сохраним! 👌
 CANCEL_RECURRENT_PAYMENT_BUTTON: Понимаю, хочу отменить
 ONE_CLICK_INSTALL_BUTTON: Подключиться в 1 клик!
+ONE_CLICK_INSTALL_HAPP_BUTTON: Подключиться через Happ
+ONE_CLICK_INSTALL_INCY_BUTTON: Подключиться через INCY
+INCY_DOESNT_WORK_BUTTON: Не работает INCY
 BACK_TO_QUESTIONS_BUTTON: Назад
 
 THREE_DAYS_PROMO_TARIFF_BUTTON: Попробовать за {}₽

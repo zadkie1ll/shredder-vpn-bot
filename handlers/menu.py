@@ -31,10 +31,10 @@ from .misc import sales_referrer_username_from_args
 from .misc import data_limit_reset_strategy_to_str
 from utils.config import Config
 from utils.public_resources import TELEGRAM_BOT_URL
-from utils.encrypt_happ_url import encrypt_happ_url
 from utils.redis_message_broker import RedisMessageBroker
 from utils.rwms_helpers import create_user
 from utils.rwms_helpers import update_user
+from utils.referral_rewards import award_standard_referral_registration_bonus
 from utils.translator import translator as ts
 from utils.sql_helpers import (
     get_number_of_invited_referrals,
@@ -56,7 +56,24 @@ from common.rwms_client import RwmsClient
 from common.models.messages import ConversionEvent
 
 menu_router = Router()
+OLD_INSTALL_VPN_BUTTON = "Установить VPN"
 OLD_QUESTIONS_BUTTON = "Вопросы"
+_REFRESHED_KEYBOARD_USER_IDS: set[int] = set()
+
+
+async def __maybe_refresh_main_menu_keyboard(message: Message):
+    if message.from_user is None:
+        return
+
+    user_id = message.from_user.id
+    if user_id in _REFRESHED_KEYBOARD_USER_IDS:
+        return
+
+    _REFRESHED_KEYBOARD_USER_IDS.add(user_id)
+    await message.answer(
+        "Меню обновлено",
+        reply_markup=markups.MAIN_MENU_REPLY_KEYBOARD.as_markup(resize_keyboard=True),
+    )
 
 
 def __get_welcome_message(
@@ -175,6 +192,7 @@ async def __main_menu_button_clicked(
                         expire_at=expire_at,
                         telegram_username=message.from_user.username,
                         referral_type=referral_type,
+                        bot_instance=config.bot_instance_id,
                     )
 
                     await add_user_to_traffic_progress(
@@ -210,6 +228,7 @@ async def __main_menu_button_clicked(
                         telegram_id=message.from_user.id,
                         expire_at=expire_at,
                         telegram_username=message.from_user.username,
+                        bot_instance=config.bot_instance_id,
                     )
 
                     await add_user_to_traffic_progress(
@@ -220,6 +239,7 @@ async def __main_menu_button_clicked(
                         session=session,
                         telegram_id=message.from_user.id,
                         telegram_username=message.from_user.username,
+                        bot_instance=config.bot_instance_id,
                     )
 
                 found_event, prev_traffic_source = (
@@ -250,6 +270,44 @@ async def __main_menu_button_clicked(
                 )
                 logging.debug(f"update ymid to {ymid} for user {message.from_user.id}")
 
+        registration_bonus = None
+        if (
+            newly_created_user
+            and db_user is not None
+            and db_user.referral_type == ReferralType.STANDARD
+        ):
+            async with tx(session_maker) as session:
+                registration_bonus = (
+                    await award_standard_referral_registration_bonus(
+                        session=session,
+                        rwms_client=rwms_client,
+                        config=config,
+                        referral_tg_id=message.from_user.id,
+                    )
+                )
+            if registration_bonus["status"] == "ok":
+                try:
+                    await message.bot.send_message(
+                        chat_id=registration_bonus["referrer"].telegram_id,
+                        text=ts.get(
+                            "ru",
+                            "NOTIFY_REFERRAL_REGISTRATION_BONUS",
+                            registration_bonus["days"],
+                        ),
+                    )
+                except TelegramForbiddenError:
+                    logging.info("referrer blocked registration bonus notification")
+                except Exception:
+                    logging.exception("failed to send registration bonus notification")
+            elif registration_bonus["status"] not in {
+                "already_awarded",
+                "not_standard_referral",
+            }:
+                logging.warning(
+                    "registration referral bonus was not applied: status=%s",
+                    registration_bonus["status"],
+                )
+
         markup = markups.MAIN_MENU_REPLY_KEYBOARD.as_markup(resize_keyboard=True)
 
         await message.answer(
@@ -261,6 +319,7 @@ async def __main_menu_button_clicked(
             ),
             reply_markup=markup,
         )
+        _REFRESHED_KEYBOARD_USER_IDS.add(message.from_user.id)
 
         select_device_markup = markups.SELECT_YOUR_DEVICE_INLINE_KEYBOARD.as_markup()
 
@@ -277,6 +336,7 @@ async def __main_menu_button_clicked(
 
 
 # Кнопка "Установить VPN"
+@menu_router.message(F.text.startswith(OLD_INSTALL_VPN_BUTTON))
 @menu_router.message(F.text.startswith(ts.get("ru", "INSTALL_VPN_BUTTON")))
 @log_function_name
 @send_typing_action
@@ -288,6 +348,7 @@ async def __install_vpn_button_clicked(
 ):
     try:
         log_user = get_log_username(user=message.from_user)
+        await __maybe_refresh_main_menu_keyboard(message)
 
         event = analytics_event.InstallVpnClicked()
         db_user = await send_analytics_event(session_maker, message.from_user.id, event)
@@ -325,6 +386,8 @@ async def __tariffs_button_clicked(
     log_user = get_log_username(user=message.from_user)
 
     try:
+        await __maybe_refresh_main_menu_keyboard(message)
+
         event = analytics_event.ShowTariffsClicked()
         db_user = await send_analytics_event(session_maker, message.from_user.id, event)
 
@@ -379,6 +442,7 @@ async def __my_profile_button_clicked(
 ):
     try:
         log_user = get_log_username(user=message.from_user)
+        await __maybe_refresh_main_menu_keyboard(message)
 
         event = analytics_event.ShowProfileClicked()
         db_user = await send_analytics_event(session_maker, message.from_user.id, event)
@@ -404,16 +468,14 @@ async def __my_profile_button_clicked(
             else "♾️"
         )
 
-        encrypted_happ_url = (
-            f"happ://crypt3/{encrypt_happ_url(user.subscription_url + "/custom-json")}"
-        )
+        custom_json_subscription_url = user.subscription_url + "/custom-json"
 
         if user.HasField("traffic_limit_bytes") and user.traffic_limit_bytes != 0:
             await message.answer(
                 ts.get(
                     "ru",
                     "MY_PROFILE_TRAFFIC_LIMIT",
-                    encrypted_happ_url,
+                    custom_json_subscription_url,
                     user.subscription_url,
                     status_to_str(user.status),
                     user.lifetime_used_traffic_bytes / (1024**3),
@@ -429,7 +491,7 @@ async def __my_profile_button_clicked(
                 ts.get(
                     "ru",
                     "MY_PROFILE",
-                    encrypted_happ_url,
+                    custom_json_subscription_url,
                     user.subscription_url,
                     status_to_str(user.status),
                     user.lifetime_used_traffic_bytes / (1024**3),
@@ -460,17 +522,10 @@ async def __questions_button_clicked(
 ):
     try:
         log_user = get_log_username(user=message.from_user)
+        await __maybe_refresh_main_menu_keyboard(message)
 
         event = analytics_event.ShowQuestionsClicked()
         db_user = await send_analytics_event(session_maker, message.from_user.id, event)
-
-        if message.text and message.text.startswith(OLD_QUESTIONS_BUTTON):
-            await message.answer(
-                "Меню обновлено",
-                reply_markup=markups.MAIN_MENU_REPLY_KEYBOARD.as_markup(
-                    resize_keyboard=True
-                ),
-            )
 
         await send_conversion_event(
             config=config,
@@ -508,6 +563,8 @@ async def __invite_friend_button_clicked(
     session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
 ):
     try:
+        await __maybe_refresh_main_menu_keyboard(message)
+
         async with tx(session_maker) as session:
             db_user = await get_user_by_telegram_id(session, message.from_user.id)
 
@@ -561,7 +618,8 @@ async def __invite_friend_button_clicked(
             caption=ts.get(
                 "ru",
                 "REFERRAL_PROGRAM",
-                config.referrer_bonus_days,
+                config.referral_registration_bonus_days,
+                config.referral_traffic_bonus_days,
                 config.referral_bonus_days,
                 config.trial_period_days,
                 invited_count,

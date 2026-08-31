@@ -16,6 +16,95 @@ from utils.rwms_helpers import update_user
 from utils.sql_helpers import extend_user_subscription_by_tg_id
 
 
+async def award_standard_referral_registration_bonus(
+    session,
+    rwms_client: RwmsClient,
+    config: Config,
+    referral_tg_id: int,
+) -> dict:
+    """Give the inviter the registration part of the standard referral reward.
+
+    Locking the referral row serializes concurrent /start requests. The unique
+    (referral_id, bonus_type) constraint remains the final duplicate guard.
+    """
+    referral = await session.scalar(
+        select(User)
+        .where(User.telegram_id == referral_tg_id)
+        .with_for_update()
+        .limit(1)
+    )
+    if referral is None:
+        return {"status": "referral_not_found"}
+    if (
+        referral.referral_type != ReferralType.STANDARD
+        or referral.referred_by_id is None
+    ):
+        return {"status": "not_standard_referral", "referral": referral}
+
+    already_awarded = await session.scalar(
+        select(ReferralBonus.id)
+        .where(
+            and_(
+                ReferralBonus.referral_id == referral.id,
+                ReferralBonus.bonus_type == ReferralBonusType.REGISTRATION,
+            )
+        )
+        .limit(1)
+    )
+    if already_awarded is not None:
+        return {"status": "already_awarded", "referral": referral}
+
+    referrer = await session.scalar(
+        select(User).where(User.id == referral.referred_by_id).limit(1)
+    )
+    if referrer is None:
+        return {"status": "referrer_not_found", "referral": referral}
+
+    referrer_username = referrer.username or str(referrer.telegram_id)
+    rwms_user = await rwms_client.get_user_by_username(referrer_username)
+    if rwms_user is None:
+        return {
+            "status": "rwms_referrer_not_found",
+            "referral": referral,
+            "referrer": referrer,
+        }
+
+    days = config.referral_registration_bonus_days
+    interval = timedelta(days=days)
+    user_response, _ = await update_user(
+        rwms_client=rwms_client,
+        config=config,
+        user=rwms_user,
+        interval=interval,
+    )
+    if user_response is None:
+        return {
+            "status": "rwms_update_failed",
+            "referral": referral,
+            "referrer": referrer,
+        }
+
+    await extend_user_subscription_by_tg_id(
+        session=session,
+        telegram_id=referrer.telegram_id,
+        interval=interval,
+    )
+    session.add(
+        ReferralBonus(
+            referral_id=referral.id,
+            referrer_id=referrer.id,
+            bonus_type=ReferralBonusType.REGISTRATION,
+            days_added=days,
+        )
+    )
+    return {
+        "status": "ok",
+        "referral": referral,
+        "referrer": referrer,
+        "days": days,
+    }
+
+
 async def award_referral_purchase_bonus(
     session,
     rwms_client: RwmsClient,
