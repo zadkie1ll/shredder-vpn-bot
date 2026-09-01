@@ -21,6 +21,7 @@ from common.models.messages import ReferralReachedTrafficBonusApplied
 from utils.referral_rewards import award_sales_referral_purchase_bonus
 from utils.redis_message_broker import RedisMessageBroker
 from texts.notifications import NOTIFICATION_CONFIG, SILENT_NOTIFICATION_TYPES
+from utils.translator import translator as ts
 from utils.sql_helpers import tx
 from utils.sql_helpers import get_user_bot_instance
 
@@ -28,6 +29,27 @@ from utils.sql_helpers import (
     get_latest_successful_payment_by_tg_id,
     has_payment_for_user_by_tg_id,
 )
+
+# "Предложения купить", отправленные проактивно (без действия юзера) — по ним
+# считаем конверсию: отправили -> купил или нет. Обычные приветствия, кнопки в
+# боте и рефералка сюда не входят — так решил старший разраб.
+OFFER_NOTIFICATION_TYPES = {
+    "subscription-expired",
+    "3-days-left",
+    "1-day-left",
+    "nc-yesterday-created",
+}
+
+# Сигнал "юзер купил" — если для него есть запомненное предложение, отмечаем
+# конверсию. purchase-success-autopay сюда входит, даже если сообщение по нему
+# не шлётся (см. пропуск ниже в listen_notifications).
+SUCCESS_NOTIFICATION_TYPES = {
+    "purchase-success-autopay",
+    "purchase-success-non-autopay",
+}
+
+PENDING_CONVERSION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 дней
+
 
 def has_telegram_recipient(message: NotificateUserMessage) -> bool:
     return message.telegram_id is not None and message.telegram_id > 0
@@ -92,6 +114,7 @@ async def process_notification(
     bot: Bot,
     session_maker: async_sessionmaker,
     message: NotificateUserMessage,
+    redis_message_broker: RedisMessageBroker | None = None,
 ) -> None:
     if not has_telegram_recipient(message):
         logging.info(
@@ -119,8 +142,8 @@ async def process_notification(
     text_to_send = None
     markup = None
 
-    if "static" in config:
-        text_to_send = config["static"]
+    if "static_key" in config:
+        text_to_send = ts.get("ru", config["static_key"])
 
         if notification_type == "purchase-success-non-autopay":
             async with session_maker() as session:
@@ -138,7 +161,7 @@ async def process_notification(
                 days_word = pluralize_ru(days, ("день", "дня", "дней"))
                 text_to_send = text_to_send.format(days=days, days_word=days_word)
             else:
-                text_to_send = config["fallback"]
+                text_to_send = ts.get("ru", config["fallback_key"])
 
         if isinstance(message, ReferralReachedTrafficBonusApplied):
             friend_forms = (
@@ -155,34 +178,27 @@ async def process_notification(
             tariff_name = tariff_to_human_str(tariff)
 
             if tariff_name is not None:
-                text_to_send = config["static"].format(
+                text_to_send = ts.get("ru", config["static_key"]).format(
                     tariff_name, message.bonus_days_count
                 )
 
-    elif "random_list" in config:
-        text_to_send = config["random_list"][randint(0, len(config["random_list"]) - 1)]
+    elif "random_keys" in config:
+        key = config["random_keys"][randint(0, len(config["random_keys"]) - 1)]
+        text_to_send = ts.get("ru", key)
         markup = markups.SELECT_YOUR_DEVICE_INLINE_KEYBOARD.as_markup()
     else:
         async with session_maker() as session:
             has_payment = await has_payment_for_user_by_tg_id(
                 session=session, telegram_id=telegram_id
             )
-            if isinstance(config["promo"], list):
-                text_to_send = (
-                    config["promo"][randint(0, len(config["promo"]) - 1)]
-                    if not has_payment
-                    else config["regular"]
-                )
-            else:
-                text_to_send = config["promo"] if not has_payment else config["regular"]
-
             if not has_payment:
-                text_to_send = format_trial_promo_text(text_to_send)
-
-            if has_payment:
-                markup = markups.SELECT_TARIFF_INLINE_KEYBOARD.as_markup()
-            else:
+                promo_keys = config["promo_keys"]
+                key = promo_keys[randint(0, len(promo_keys) - 1)]
+                text_to_send = format_trial_promo_text(ts.get("ru", key))
                 markup = markups.PROMO_SELECT_TARIFF_INLINE_KEYBOARD.as_markup()
+            else:
+                text_to_send = ts.get("ru", config["regular_key"])
+                markup = markups.SELECT_TARIFF_INLINE_KEYBOARD.as_markup()
 
     logging.info(f"sending notification '{notification_type}' to user {telegram_id}")
     notified = await safe_send_message(
@@ -193,6 +209,13 @@ async def process_notification(
         logging.info(
             f"notification '{notification_type}' for user {telegram_id} handled"
         )
+
+        if notification_type in OFFER_NOTIFICATION_TYPES and redis_message_broker is not None:
+            event_id = await ts.send_event(notification_type, telegram_id)
+            if event_id is not None:
+                await redis_message_broker.remember_pending_conversion(
+                    telegram_id, event_id, PENDING_CONVERSION_TTL_SECONDS
+                )
 
 
 async def try_award_sales_referral_purchase_bonus(
@@ -258,6 +281,13 @@ async def listen_notifications(
                     )
                     continue
 
+                if message.notification_type in SUCCESS_NOTIFICATION_TYPES:
+                    pending_event_id = await redis_message_broker.pop_pending_conversion(
+                        message.telegram_id
+                    )
+                    if pending_event_id is not None:
+                        await ts.convert_event(pending_event_id)
+
                 if message.notification_type == "purchase-success-autopay":
                     logging.debug(
                         "skipping notification type 'purchase-success-autopay'"
@@ -284,7 +314,7 @@ async def listen_notifications(
                     await asyncio.sleep(random.uniform(0.5, 1.5))
                     continue
 
-                await process_notification(bot, session_maker, message)
+                await process_notification(bot, session_maker, message, redis_message_broker)
 
                 if message.notification_type == "purchase-success-non-autopay":
                     await try_award_sales_referral_purchase_bonus(

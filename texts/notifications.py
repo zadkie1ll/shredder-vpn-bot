@@ -1,44 +1,41 @@
-from utils.translator import translator as ts
-
-SUB_EXPIRED_PROMO_MESSAGES = [
-    ts.get("ru", "NOTIFY_EXPIRED_USER_PROMO1"),
-    ts.get("ru", "NOTIFY_EXPIRED_USER_PROMO2"),
-    ts.get("ru", "NOTIFY_EXPIRED_USER_PROMO3"),
-    ts.get("ru", "NOTIFY_EXPIRED_USER_PROMO4"),
-    ts.get("ru", "NOTIFY_EXPIRED_USER_PROMO5"),
-]
-
-NOT_CONNECTED_MESSAGES = [
-    ts.get("ru", "NOTIFY_YESTERDAY_CREATED1"),
-    ts.get("ru", "NOTIFY_YESTERDAY_CREATED2"),
-    ts.get("ru", "NOTIFY_YESTERDAY_CREATED3"),
-]
-
+# Ключи локалей, а не сразу текст — резолвим через ts.get() в момент отправки
+# (в utils/notifications.py), чтобы live-правки текста из vpn-bot-admin реально
+# долетали до этих уведомлений.
 NOTIFICATION_CONFIG = {
     "subscription-expired": {
-        "promo": SUB_EXPIRED_PROMO_MESSAGES,
-        "regular": ts.get("ru", "NOTIFY_EXPIRED_USER"),
+        "promo_keys": [
+            "NOTIFY_EXPIRED_USER_PROMO1",
+            "NOTIFY_EXPIRED_USER_PROMO2",
+            "NOTIFY_EXPIRED_USER_PROMO3",
+            "NOTIFY_EXPIRED_USER_PROMO4",
+            "NOTIFY_EXPIRED_USER_PROMO5",
+        ],
+        "regular_key": "NOTIFY_EXPIRED_USER",
     },
     "3-days-left": {
-        "promo": ts.get("ru", "NOTIFY_THREE_DAYS_LEFT_PROMO"),
-        "regular": ts.get("ru", "NOTIFY_THREE_DAYS_LEFT"),
+        "promo_keys": ["NOTIFY_THREE_DAYS_LEFT_PROMO"],
+        "regular_key": "NOTIFY_THREE_DAYS_LEFT",
     },
     "1-day-left": {
-        "promo": ts.get("ru", "NOTIFY_ONE_DAY_LEFT_PROMO"),
-        "regular": ts.get("ru", "NOTIFY_ONE_DAY_LEFT"),
+        "promo_keys": ["NOTIFY_ONE_DAY_LEFT_PROMO"],
+        "regular_key": "NOTIFY_ONE_DAY_LEFT",
     },
     "nc-yesterday-created": {
-        "random_list": NOT_CONNECTED_MESSAGES,
+        "random_keys": [
+            "NOTIFY_YESTERDAY_CREATED1",
+            "NOTIFY_YESTERDAY_CREATED2",
+            "NOTIFY_YESTERDAY_CREATED3",
+        ],
     },
     "purchase-success-non-autopay": {
-        "static": ts.get("ru", "NOTIFY_SUCCESSFUL_NON_AUTOPAY"),
-        "fallback": ts.get("ru", "NOTIFY_SUCCESSFUL_NON_AUTOPAY_FALLBACK"),
+        "static_key": "NOTIFY_SUCCESSFUL_NON_AUTOPAY",
+        "fallback_key": "NOTIFY_SUCCESSFUL_NON_AUTOPAY_FALLBACK",
     },
     "referral_traffic_reached_bonus_applied": {
-        "static": ts.get("ru", "NOTIFY_REFERRAL_TRAFFIC_REACHED_BONUS")
+        "static_key": "NOTIFY_REFERRAL_TRAFFIC_REACHED_BONUS"
     },
     "referral_purchase_bonus_applied": {
-        "static": ts.get("ru", "NOTIFY_REFERRAL_PURCHASE_BONUS_APPLIED")
+        "static_key": "NOTIFY_REFERRAL_PURCHASE_BONUS_APPLIED"
     },
 }
 
