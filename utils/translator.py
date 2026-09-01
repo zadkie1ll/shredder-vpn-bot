@@ -21,6 +21,37 @@ PUBLIC_RESOURCE_PLACEHOLDERS = {
     "https://SHREDDER_VPN_PUBLIC_OFFER_PLACEHOLDER": PUBLIC_OFFER_URL,
 }
 
+# Только оплата / глобальные ошибки / триал-период — остальные 70+ ключей
+# (кнопки, обычные тексты меню и т.д.) в статистику не пишем, это шум.
+TRACKED_KEYS = {
+    # Оплата
+    "YOUR_PAYMENT",
+    "CANCELED_PAYMENT",
+    "INVALID_PRICE",
+    "INVALID_INVOICE_PERIOD",
+    "NOTIFY_SUCCESSFUL_NON_AUTOPAY",
+    "NOTIFY_SUCCESSFUL_NON_AUTOPAY_FALLBACK",
+    "NOTIFY_AUTOPAY_FAILURE",
+    "NOTIFY_NON_AUTOPAY_FAILURE",
+    "NO_AUTOPAY_TO_CANCEL",
+    "AUTOPAY_CANCELED",
+    "CANCEL_AUTOPAY_OBJECTION",
+    "REJECT_CANCEL_AUTOPAY_THANKS",
+    # Глобальные ошибки
+    "SOMETHING_WRONG",
+    "TECHNICAL_WORK_MESSAGE",
+    # Триал-период
+    "WELCOME_MESSAGE_TRIAL_USER_CREATED",
+    "NOTIFY_YESTERDAY_CREATED1",
+    "NOTIFY_YESTERDAY_CREATED2",
+    "NOTIFY_YESTERDAY_CREATED3",
+    "NOTIFY_EXPIRED_USER_PROMO1",
+    "NOTIFY_EXPIRED_USER_PROMO2",
+    "NOTIFY_EXPIRED_USER_PROMO3",
+    "NOTIFY_EXPIRED_USER_PROMO4",
+    "NOTIFY_EXPIRED_USER_PROMO5",
+}
+
 
 class Translator:
     def __init__(self, locales_dir: str = "locales"):
@@ -66,7 +97,7 @@ class Translator:
         translation = self.translations.get(lang, {}).get(key, key)
         translation = self._replace_public_resource_placeholders(translation)
 
-        if known:
+        if known and key in TRACKED_KEYS:
             self._track_usage(key)
 
         # Форматируем строку если есть аргументы
