@@ -1,0 +1,37 @@
+services:
+  monkey-island-vpn-bot:
+    restart: unless-stopped
+    network_mode: host
+    hostname: monkeyisland.life
+    image: monkey-island-vpn-bot:v0.1
+    env_file:
+      - /home/zadkiel/apps/shredder-vpn-bot/docker/.env
+    privileged: true
+    volumes:
+      - log:/app/log
+      - locales:/app/locales
+      - /home/zadkiel/apps/shredder-action-controll/texts/messages.yml:/app/external/action-control-messages.yml:ro
+      - /home/zadkiel/apps/shredder-action-controll/assets:/app/external/action-control-assets:ro
+    build:
+      context: /home/zadkiel/apps/shredder-vpn-bot
+      dockerfile: docker/vpn/Dockerfile
+
+  monkey-island-vpn-bot-secondary:
+    restart: unless-stopped
+    network_mode: host
+    hostname: monkeyisland.life
+    image: monkey-island-vpn-bot:v0.1
+    env_file:
+      - /home/zadkiel/apps/shredder-vpn-bot/docker/.env.secondary
+    privileged: true
+    volumes:
+      - log-secondary:/app/log
+      - locales-secondary:/app/locales
+      - /home/zadkiel/apps/shredder-action-controll/texts/messages.yml:/app/external/action-control-messages.yml:ro
+      - /home/zadkiel/apps/shredder-action-controll/assets:/app/external/action-control-assets:ro
+
+volumes:
+  log:
+  locales:
+  log-secondary:
+  locales-secondary:

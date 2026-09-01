@@ -10,6 +10,8 @@ services:
     volumes:
       - log:/app/log
       - locales:/app/locales
+      - ../../../shredder-action-controll/texts/messages.yml:/app/external/action-control-messages.yml:ro
+      - ../../../shredder-action-controll/assets:/app/external/action-control-assets:ro
     build:
       context: .
       dockerfile: Dockerfile

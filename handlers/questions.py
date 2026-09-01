@@ -6,7 +6,6 @@ from aiogram.types import CallbackQuery
 import handlers.buttons as buttons
 import handlers.markups as markups
 from common.rwms_client import RwmsClient
-from utils.encrypt_happ_url import encrypt_happ_url
 from .misc import log_function_name
 from .misc import send_typing_action
 from utils.translator import translator as ts
@@ -67,12 +66,10 @@ async def __block_adult_websites_question_clicked(
         logging.error(f"User {query.from_user.id} not found")
         return await query.message.answer(ts.get("ru", "SOMETHING_WRONG"))
 
-    encrypted_happ_url = (
-        f"happ://crypt3/{encrypt_happ_url(user.subscription_url + "/np")}"
-    )
+    no_adult_websites_url = user.subscription_url + "/np"
 
     await query.message.edit_text(
-        text=ts.get("ru", "BLOCK_ADULT_WEBSITES_ANSWER", encrypted_happ_url),
+        text=ts.get("ru", "BLOCK_ADULT_WEBSITES_ANSWER", no_adult_websites_url),
         reply_markup=markups.BACK_TO_QUESTIONS_INLINE_KEYBOARD.as_markup(),
         disable_web_page_preview=True,
     )

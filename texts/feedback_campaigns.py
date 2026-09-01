@@ -38,7 +38,7 @@ def reward_promise_text(reward_options: list[dict] | None) -> str:
 def survey_message(message_text_key: str, reward_options: list[dict] | None) -> str:
     body = SURVEY_MESSAGE_BODIES.get(message_text_key, SURVEY_MESSAGE_BODIES["text"])
     return (
-        "Нам нужен твой совет! Расскажи, что тебе не понравилось в нашем VPN "
+        "Нам нужен твой совет! Расскажи, что тебе не понравилось в нашем сервисе "
         "и что нам нужно улучшить, чтобы ты вернулся к нам. "
         f"За честный ответ - {reward_promise_text(reward_options)}.\n\n"
         f"{body}"

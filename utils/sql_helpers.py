@@ -53,12 +53,14 @@ async def save_user_in_db(
     expire_at: Optional[datetime],
     telegram_username: Optional[str] = None,
     referral_type: Optional[ReferralType] = None,
+    bot_instance: str = "primary",
 ) -> User:
     query = text("""
         INSERT INTO users (
             telegram_id,
             username,
             telegram_username,
+            bot_instance,
             referred_by_id,
             referral_type,
             autopay_allow,
@@ -67,6 +69,7 @@ async def save_user_in_db(
             :telegram_id,
             :username,
             :telegram_username,
+            :bot_instance,
             :referred_by_id,
             :referral_type,
             :autopay_allow,
@@ -75,6 +78,7 @@ async def save_user_in_db(
         ON CONFLICT (telegram_id) DO UPDATE SET
             username = :username,
             telegram_username = :telegram_username,
+            bot_instance = :bot_instance,
             expire_at = (:expire_at)::timestamp
         RETURNING *
     """)
@@ -82,7 +86,7 @@ async def save_user_in_db(
     logging.info(
         f"Saving user in DB with telegram_id={telegram_id}, "
         f"username={username}, telegram_username={telegram_username}, "
-        f"referrer_id={referrer_id}, expire_at={expire_at}"
+        f"bot_instance={bot_instance}, referrer_id={referrer_id}, expire_at={expire_at}"
     )
 
     result = await session.execute(
@@ -92,6 +96,7 @@ async def save_user_in_db(
             "expire_at": expire_at,
             "username": username,
             "telegram_username": telegram_username,
+            "bot_instance": bot_instance,
             "referred_by_id": referrer_id,
             "referral_type": (
                 referral_type.value
@@ -117,13 +122,29 @@ async def save_user_in_db(
 
 
 async def update_user_telegram_username(
-    session: AsyncSession, telegram_id: int, telegram_username: Optional[str]
+    session: AsyncSession,
+    telegram_id: int,
+    telegram_username: Optional[str],
+    bot_instance: Optional[str] = None,
 ) -> None:
+    values = {"telegram_username": telegram_username}
+    if bot_instance is not None:
+        values["bot_instance"] = bot_instance
+
     await session.execute(
         update(User)
         .where(User.telegram_id == telegram_id)
-        .values(telegram_username=telegram_username)
+        .values(**values)
     )
+
+
+async def get_user_bot_instance(
+    session: AsyncSession, telegram_id: int
+) -> Optional[str]:
+    result = await session.execute(
+        select(User.bot_instance).where(User.telegram_id == telegram_id).limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def add_user_to_traffic_progress(session: AsyncSession, telegram_id: int) -> None:

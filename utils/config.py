@@ -7,6 +7,8 @@ MI_VPN_BOT_TRIAL_PERIOD_DAYS = "MI_VPN_BOT_TRIAL_PERIOD_DAYS"
 MI_VPN_BOT_ADMINS = "MI_VPN_BOT_ADMINS"
 MI_VPN_BOT_BANNED = "MI_VPN_BOT_BANNED"
 MI_VPN_BOT_REDIRECT_URL = "MI_VPN_BOT_REDIRECT_URL"
+MI_VPN_BOT_PUBLIC_URL = "MI_VPN_BOT_PUBLIC_URL"
+MI_VPN_BOT_INSTANCE_ID = "MI_VPN_BOT_INSTANCE_ID"
 MI_VPN_BOT_INTERNAL_SQUADS_UUIDS = "MI_VPN_BOT_INTERNAL_SQUADS_UUIDS"
 MI_VPN_BOT_REDIS_QUEUE_NAME = "MI_VPN_BOT_REDIS_QUEUE_NAME"
 MI_VPN_TW_ENABLED = "MI_VPN_TW_ENABLED"
@@ -52,6 +54,14 @@ class Config:
         )
 
         self.redirect_url = self.__read_required_str_env(MI_VPN_BOT_REDIRECT_URL)
+        self.public_bot_url: str = os.getenv(
+            MI_VPN_BOT_PUBLIC_URL,
+            "https://t.me/Shredder_vps_bot",
+        ).rstrip("/")
+        self.bot_instance_id: str = os.getenv(
+            MI_VPN_BOT_INSTANCE_ID,
+            "primary",
+        ).strip() or "primary"
 
         admins_value = os.getenv(MI_VPN_BOT_ADMINS, "")
 
@@ -100,8 +110,16 @@ class Config:
             MI_VPN_BOT_REDIS_QUEUE_NAME
         )
 
-        self.referrer_bonus_days: int = self.__read_int_env(
-            MI_VPN_BOT_REFERRER_BONUS, "10"
+        self.referral_registration_bonus_days: int = self.__read_int_env(
+            "MI_VPN_BOT_REFERRAL_REGISTRATION_BONUS", "3"
+        )
+        self.referral_traffic_bonus_days: int = self.__read_int_env(
+            "MI_VPN_BOT_REFERRAL_TRAFFIC_BONUS", "7"
+        )
+        # Kept for callers that display the total standard referral reward.
+        self.referrer_bonus_days: int = (
+            self.referral_registration_bonus_days
+            + self.referral_traffic_bonus_days
         )
         self.referral_bonus_days: int = self.__read_int_env(
             MI_VPN_BOT_REFERRAL_BONUS, "15"

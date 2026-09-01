@@ -4,6 +4,7 @@ from datetime import datetime
 from unittest import TestCase
 
 from handlers.service import generate_table_report_messages
+from handlers.service import generate_month_repeat_report_messages
 from handlers.service import generate_trial_conversion_report_messages
 from handlers.service import register_first_paid_tariff
 
@@ -107,3 +108,48 @@ class GenerateTrialConversionReportMessagesTest(TestCase):
 
         self.assertIn("Конверсия: <b>0.0%</b>", messages[0])
         self.assertIn("Конверсий за выбранный период нет", messages[0])
+
+
+class GenerateMonthRepeatReportMessagesTest(TestCase):
+    def test_generates_summary_and_repeat_users(self):
+        report_data = {
+            "month_users_count": 4,
+            "repeat_users": [
+                {
+                    "telegram_id": 123456,
+                    "telegram_username": "turtle",
+                    "month_purchased_at": datetime(2026, 5, 1, 10, 0),
+                    "next_payment_at": datetime(2026, 5, 29, 12, 30),
+                    "next_tariff": "month",
+                    "next_payment_amount": 249,
+                }
+            ],
+            "tariff_stats": {"1 месяц": 1},
+        }
+
+        messages = generate_month_repeat_report_messages(
+            report_data=report_data,
+            start_date=date(2026, 5, 1),
+            end_date=date(2026, 5, 31),
+        )
+        report = "\n".join(messages)
+
+        self.assertIn("Купили тариф на 1 месяц: <b>4</b>", report)
+        self.assertIn("Сделали следующий платеж позже: <b>1</b>", report)
+        self.assertIn("Повторная оплата: <b>25.0%</b>", report)
+        self.assertIn("<code>123456</code> (@turtle)", report)
+        self.assertIn("затем: 1 месяц, 249 ₽", report)
+
+    def test_handles_empty_report(self):
+        messages = generate_month_repeat_report_messages(
+            report_data={
+                "month_users_count": 0,
+                "repeat_users": [],
+                "tariff_stats": {},
+            },
+            start_date=date(2026, 5, 1),
+            end_date=date(2026, 5, 31),
+        )
+
+        self.assertIn("Повторная оплата: <b>0.0%</b>", messages[0])
+        self.assertIn("Повторных оплат после месячного тарифа нет", messages[0])

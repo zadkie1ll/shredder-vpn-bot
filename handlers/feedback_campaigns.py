@@ -625,12 +625,16 @@ async def on_feedback_send_confirm(
 async def on_feedback_button_answer(
     query: CallbackQuery,
     state: FSMContext,
+    config: Config,
     session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
 ):
     try:
         async with tx(session_maker) as session:
             await update_user_telegram_username(
-                session, query.from_user.id, query.from_user.username
+                session,
+                query.from_user.id,
+                query.from_user.username,
+                bot_instance=config.bot_instance_id,
             )
         _, recipient_id, button_value = query.data.split(":")
         answer_result = await feedback_service.save_button_answer_and_issue_reward(
@@ -667,12 +671,16 @@ async def on_feedback_button_answer(
 async def on_feedback_text_answer(
     message: Message,
     state: FSMContext,
+    config: Config,
     session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
 ):
     try:
         async with tx(session_maker) as session:
             await update_user_telegram_username(
-                session, message.from_user.id, message.from_user.username
+                session,
+                message.from_user.id,
+                message.from_user.username,
+                bot_instance=config.bot_instance_id,
             )
         current_state = await state.get_state()
         if current_state == FeedbackBroadcastStates.other_reason.state:
@@ -796,6 +804,42 @@ async def on_feedback_reward_selected(
     except Exception as exc:
         logging.exception("feedback reward selection failed: %s", exc)
         await query.answer("Не получилось создать оплату", show_alert=True)
+
+
+@feedback_campaigns_router.callback_query(F.data.startswith("fb_reward_menu:"))
+async def on_feedback_reward_menu_requested(
+    query: CallbackQuery,
+    session_maker: sqlalchemy.ext.asyncio.async_sessionmaker,
+):
+    try:
+        _, reward_id_raw = query.data.split(":")
+        reward_id = int(reward_id_raw)
+
+        async with tx(session_maker) as session:
+            reward = await repo.get_reward_for_user(
+                session,
+                reward_id=reward_id,
+                telegram_id=query.from_user.id,
+            )
+            if reward is None:
+                await query.answer(
+                    "Скидка не найдена или уже использована.", show_alert=True
+                )
+                return
+
+        await query.message.answer(
+            "Выберите тариф со скидкой:",
+            reply_markup=feedback_service.build_reward_keyboard(
+                reward.id,
+                reward.reward_options,
+            ),
+        )
+        await query.answer("Выберите тариф")
+    except TelegramForbiddenError:
+        raise
+    except Exception as exc:
+        logging.exception("feedback reward menu failed: %s", exc)
+        await query.answer("Не получилось открыть скидку", show_alert=True)
 
 
 @feedback_campaigns_router.callback_query(F.data.startswith("fb_reward_days:"))

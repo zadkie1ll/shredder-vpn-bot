@@ -1,0 +1,116 @@
+trial_three_days_left:
+  photo: assets/trial-three-days-left.jpg
+  text: |
+    ⏳ Подписка заканчивается через 3 дня
+
+    Скоро доступ к VPN закончится – если не хотите остаться без доступа к нужным сайтам в самый неподходящий момент, продлите заранее
+
+    Чем длиннее срок подписки, тем выгоднее стоимость месяца
+  buttons:
+    - {text: "249₽ за 1 мес", subscription_period: month, discount_amount: 0}
+    - {text: "599₽ за 3 мес (~200₽/мес)", subscription_period: threemonths, discount_amount: 0}
+    - {text: "1799₽ за 12 мес (~150₽/мес)", subscription_period: year, discount_amount: 0}
+
+trial_one_day_left:
+  text: |
+    Ну как вам первая неделя с Shredder? 👀
+
+    Хотим узнать честно, что понравилось, а что можно улучшить – напишите пару слов в ответ на это сообщение, для нас это правда важно, чтобы улучшать работу сервиса🙌
+
+    Еще напоминаем, что завтра закончится пробный период. Выберите подходящий тариф ниже для продления 👇
+  buttons:
+    - {text: "10₽ (3 дня)", subscription_period: threedays, discount_amount: 0}
+    - {text: "249₽ за 1 мес", subscription_period: month, discount_amount: 0}
+    - {text: "599₽ за 3 мес (~200₽/мес)", subscription_period: threemonths, discount_amount: 0}
+    - {text: "1799₽ за 12 мес (~150₽/мес)", subscription_period: year, discount_amount: 0}
+
+trial_ended:
+  photo: assets/trial-ended.jpg
+  text: |
+    Пробный период подошёл к концу, и доступ к VPN сейчас отключён
+
+    Если за эту неделю сервис понравился – выбирайте тариф и пользуйтесь дальше 👇
+  buttons:
+    - {text: "249₽ за 1 мес", subscription_period: month, discount_amount: 0}
+    - {text: "599₽ за 3 мес (~200₽/мес)", subscription_period: threemonths, discount_amount: 0}
+    - {text: "1799₽ за 12 мес (~150₽/мес)", subscription_period: year, discount_amount: 0}
+
+trial_day_nine:
+  text: |
+    Shredder всё ещё ждёт вас! 👋
+
+    Одна подписка – на все устройства! Подключайте на телефон, телевизор, компьютер и пользуйтесь
+
+    Тарифы ниже, выбирайте под себя 👇
+  buttons:
+    - {text: "249₽ за 1 мес", subscription_period: month, discount_amount: 0}
+    - {text: "599₽ за 3 мес (~200₽/мес)", subscription_period: threemonths, discount_amount: 0}
+    - {text: "1799₽ за 12 мес (~150₽/мес)", subscription_period: year, discount_amount: 0}
+
+trial_first_month_offer:
+  reward_expires_hours: 48
+  photo: assets/trial-first-month-offer.jpg
+  text: |
+    🎁 Скидка на первый месяц, чтобы точно распробовать сервис
+
+    Если недели пробного периода не хватило на решение – держите первый месяц за 149₽ вместо 249₽, экономия 100₽
+
+    Предложение действует 48 часов, дальше – по обычной цене ⏳
+  buttons:
+    - {text: "Забрать за 149₽ / мес.", subscription_period: month, discount_amount: 100}
+
+short_feedback_oneday:
+  reward_expires_hours: 72
+  text: |
+    Заметили, что вы оформили подписку на 1 день – как впечатления? 👀
+
+    Расскажите пару слов, что понравилось, а что не очень – читаем каждый ответ и улучшаем работу сервиса для вас!🙌🏻
+
+    И раз уж успели попробовать – держите скидку 30% на любой тариф, если оформите в ближайшие 3 дня 💚
+  buttons:
+    - {text: "174₽ за 1 мес (вместо 249₽)", subscription_period: month, discount_percent: 30}
+    - {text: "419₽ за 3 мес (вместо 599₽)", subscription_period: threemonths, discount_percent: 30}
+    - {text: "1259₽ за 12 мес (вместо 1799₽)", subscription_period: year, discount_percent: 30}
+
+short_feedback_threedays:
+  reward_expires_hours: 72
+  text: |
+    Заметили, что вы оформили подписку на 3 дня – как впечатления? 👀
+
+    Расскажите пару слов, что понравилось, а что не очень – читаем каждый ответ и улучшаем работу сервиса для вас!🙌🏻
+
+    И раз уж успели попробовать – держите скидку 30% на любой тариф, если оформите в ближайшие 3 дня 💚
+  buttons:
+    - {text: "174₽ за 1 мес (вместо 249₽)", subscription_period: month, discount_percent: 30}
+    - {text: "419₽ за 3 мес (вместо 599₽)", subscription_period: threemonths, discount_percent: 30}
+    - {text: "1259₽ за 12 мес (вместо 1799₽)", subscription_period: year, discount_percent: 30}
+
+short_final_offer:
+  reward_expires_hours: 48
+  text: |
+    Так, ладно – сдаёмся вежливо намекать. Ответьте, а? 🙏
+
+    Не обиделись, что вы прошли мимо в прошлый раз, правда... Но если была причина остаться в стороне – скажите, нам правда интересно, что не так то?😢
+
+    И раз уж мы тут откровенно вымаливаем внимание – держите скидку 50% на тарифы: 3 месяца (100₽/мес.) или год (75₽/мес.)
+
+    У вас есть 48 часов, чтобы воспользоваться таким щедрым предложением 😎
+  buttons:
+    - {text: "3 месяца за 299₽", subscription_period: threemonths, discount_amount: 300, row: 0}
+    - {text: "Год за 899₽", subscription_period: year, discount_amount: 900, row: 0}
+
+regular_subscription_ended:
+  photo: assets/regular-subscription-ended.jpg
+  text: |
+    🔐 Ваша подписка истекла!
+
+    Не теряйте доступ к быстрому и безопасному интернету! Продлите подписку прямо сейчас и получите:
+
+    ⚡ Высокоскоростное подключение до 1 Гбит/с – смотрите видео в 4K без тормозов
+    🎥 YouTube без рекламы – наслаждайтесь любимыми роликами без надоедливых прерываний
+    📱 Полный доступ к Instagram – листайте ленту и сторис без ограничений
+    🌐 Защита данных – ваше соединение остаётся конфиденциальным
+  buttons:
+    - {text: "249₽ за 1 мес", subscription_period: month, discount_amount: 0}
+    - {text: "599₽ за 3 мес (~200₽/мес)", subscription_period: threemonths, discount_amount: 0}
+    - {text: "1799₽ за 12 мес (~150₽/мес)", subscription_period: year, discount_amount: 0}
