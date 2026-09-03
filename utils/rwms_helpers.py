@@ -76,7 +76,7 @@ async def update_user(
 
     update_user_response = await rwms_client.update_user(
         proto.UpdateUserRequest(
-            uuid=user.uuid,
+            user_id=user.id,
             expire_at=new_expire_at,
             status=proto.UserStatus.ACTIVE,
             traffic_limit_strategy=proto.TrafficLimitStrategy.NO_RESET,

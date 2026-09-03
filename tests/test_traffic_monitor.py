@@ -32,6 +32,7 @@ class FakeRwmsClient:
     def __init__(self) -> None:
         self.request = None
         self.user = SimpleNamespace(
+            id=42,
             uuid="rwms-uuid",
             active_internal_squads=[SimpleNamespace(uuid="squad-uuid")],
         )
@@ -63,7 +64,7 @@ class TrafficMonitorHandlerTest(IsolatedAsyncioTestCase):
             rwms_client=rwms_client,
         )
 
-        self.assertEqual(rwms_client.request.uuid, "rwms-uuid")
+        self.assertEqual(rwms_client.request.user_id, 42)
         self.assertEqual(rwms_client.request.status, proto.UserStatus.DISABLED)
         self.assertEqual(
             list(rwms_client.request.active_internal_squads),

@@ -44,7 +44,7 @@ async def block_traffic_anomaly_user(
 
         response = await rwms_client.update_user(
             proto.UpdateUserRequest(
-                uuid=rwms_user.uuid,
+                user_id=rwms_user.id,
                 status=proto.UserStatus.DISABLED,
                 active_internal_squads=[
                     squad.uuid for squad in rwms_user.active_internal_squads
