@@ -95,6 +95,44 @@ class RedisMessageBroker:
             )
             return None
 
+    async def increment_notification_report_stat(
+        self,
+        bot_instance_id: str,
+        notification_type: str,
+        status: str,
+    ) -> None:
+        key = f"notification-delivery-report:{bot_instance_id}"
+        try:
+            await self.__redis.hincrby(key, "total", 1)
+            await self.__redis.hincrby(key, f"status:{status}", 1)
+            await self.__redis.hincrby(key, f"type:{notification_type}", 1)
+            await self.__redis.hincrby(
+                key, f"type_status:{notification_type}:{status}", 1
+            )
+            await self.__redis.expire(key, 7 * 24 * 60 * 60)
+        except Exception:
+            logging.exception(
+                "failed to increment notification report stats for bot_instance=%s",
+                bot_instance_id,
+            )
+
+    async def pop_notification_report_stats(
+        self,
+        bot_instance_id: str,
+    ) -> dict[str, int]:
+        key = f"notification-delivery-report:{bot_instance_id}"
+        try:
+            raw_stats = await self.__redis.hgetall(key)
+            if raw_stats:
+                await self.__redis.delete(key)
+            return {field: int(value) for field, value in raw_stats.items()}
+        except Exception:
+            logging.exception(
+                "failed to pop notification report stats for bot_instance=%s",
+                bot_instance_id,
+            )
+            return {}
+
     async def pop_message(self, timeout: int) -> MessageUnion | None:
         try:
             job = await self.__redis.blpop(

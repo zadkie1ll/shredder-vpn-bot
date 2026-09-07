@@ -2,6 +2,10 @@ import logging
 import random
 import asyncio
 import handlers.markups as markups
+from dataclasses import dataclass
+from datetime import datetime
+from datetime import timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional
 from random import randint
 from aiogram import Bot
@@ -49,6 +53,16 @@ SUCCESS_NOTIFICATION_TYPES = {
 }
 
 PENDING_CONVERSION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 дней
+MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+DAILY_REPORT_HOUR = 19
+DAILY_REPORT_MINUTE = 0
+
+
+@dataclass(frozen=True)
+class SendResult:
+    handled: bool
+    sent: bool
+    status: str
 
 
 def has_telegram_recipient(message: NotificateUserMessage) -> bool:
@@ -78,16 +92,16 @@ def pluralize_ru(count: int, forms: tuple[str, str, str]) -> str:
 
 async def safe_send_message(
     bot: Bot, chat_id: int, text: str, markup: Optional[ReplyMarkupUnion]
-) -> bool:
+) -> SendResult:
     """
-    Отправляет сообщение пользователю и возвращает True/False.
-    True — сообщение доставлено ИЛИ ошибка, при которой нельзя ничего сделать (chat not found, bot blocked).
-    False — ошибка, из-за которой можно попробовать повторить отправку.
+    Отправляет сообщение пользователю.
+    handled=True означает, что сообщение не надо возвращать в очередь.
+    sent=True означает, что Telegram реально принял сообщение.
     """
     try:
         await bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)
         logging.info(f"message sent to {chat_id}")
-        return True
+        return SendResult(handled=True, sent=True, status="sent")
     except TelegramRetryAfter as e:
         logging.warning(
             f"got TelegramRetryAfter for {chat_id}, sleep {e.retry_after} seconds"
@@ -98,16 +112,16 @@ async def safe_send_message(
     except TelegramForbiddenError as e:
         # Бот заблокирован пользователем
         logging.warning(f"can't send message to {chat_id}: bot was blocked ({e})")
-        return True
+        return SendResult(handled=True, sent=False, status="undeliverable")
     except TelegramBadRequest as e:
         if "chat not found" in str(e).lower():
             logging.warning(f"can't send message to {chat_id}: chat not found ({e})")
-            return True
+            return SendResult(handled=True, sent=False, status="undeliverable")
         logging.error(f"bad request while sending message to {chat_id}: {e}")
-        return False
+        return SendResult(handled=False, sent=False, status="failed")
     except Exception as e:
         logging.exception(f"unexpected error sending message to {chat_id}: {e}")
-        return False
+        return SendResult(handled=False, sent=False, status="failed")
 
 
 async def process_notification(
@@ -115,13 +129,13 @@ async def process_notification(
     session_maker: async_sessionmaker,
     message: NotificateUserMessage,
     redis_message_broker: RedisMessageBroker | None = None,
-) -> None:
+) -> str:
     if not has_telegram_recipient(message):
         logging.info(
             "Skipping notification '%s' because no Telegram account is linked",
             message.notification_type,
         )
-        return
+        return "skipped_no_recipient"
 
     telegram_id = message.telegram_id
     notification_type = message.notification_type
@@ -132,12 +146,12 @@ async def process_notification(
             notification_type,
             telegram_id,
         )
-        return
+        return "skipped_silent"
 
     config = NOTIFICATION_CONFIG.get(notification_type)
     if not config:
         logging.warning(f"unknown notification type: {notification_type}")
-        return
+        return "unknown_type"
 
     text_to_send = None
     markup = None
@@ -201,21 +215,27 @@ async def process_notification(
                 markup = markups.SELECT_TARIFF_INLINE_KEYBOARD.as_markup()
 
     logging.info(f"sending notification '{notification_type}' to user {telegram_id}")
-    notified = await safe_send_message(
+    send_result = await safe_send_message(
         bot=bot, chat_id=telegram_id, text=text_to_send, markup=markup
     )
 
-    if notified:
+    if send_result.handled:
         logging.info(
             f"notification '{notification_type}' for user {telegram_id} handled"
         )
 
-        if notification_type in OFFER_NOTIFICATION_TYPES and redis_message_broker is not None:
+        if (
+            send_result.sent
+            and notification_type in OFFER_NOTIFICATION_TYPES
+            and redis_message_broker is not None
+        ):
             event_id = await ts.send_event(notification_type, telegram_id)
             if event_id is not None:
                 await redis_message_broker.remember_pending_conversion(
                     telegram_id, event_id, PENDING_CONVERSION_TTL_SECONDS
                 )
+
+    return send_result.status
 
 
 async def try_award_sales_referral_purchase_bonus(
@@ -254,6 +274,110 @@ async def try_award_sales_referral_purchase_bonus(
     )
 
 
+def seconds_until_next_daily_report(now: datetime | None = None) -> float:
+    if now is None:
+        now = datetime.now(MOSCOW_TZ)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=MOSCOW_TZ)
+    else:
+        now = now.astimezone(MOSCOW_TZ)
+
+    next_report = now.replace(
+        hour=DAILY_REPORT_HOUR,
+        minute=DAILY_REPORT_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    if next_report <= now:
+        next_report += timedelta(days=1)
+
+    return (next_report - now).total_seconds()
+
+
+def format_notification_report(stats: dict[str, int], bot_instance_id: str) -> str:
+    total = stats.get("total", 0)
+    sent = stats.get("status:sent", 0)
+    undeliverable = stats.get("status:undeliverable", 0)
+    failed = stats.get("status:failed", 0)
+    skipped = sum(
+        value
+        for key, value in stats.items()
+        if key.startswith("status:skipped_") or key == "status:unknown_type"
+    )
+
+    lines = [
+        "📬 <b>Ежедневный отчет по уведомлениям</b>",
+        f"Бот: <code>{bot_instance_id}</code>",
+        "Период: с прошлого отчета до 19:00 МСК",
+        "",
+        f"Всего обработано: <b>{total}</b>",
+        f"Отправлено: <b>{sent}</b>",
+        f"Недоставляемые чаты: <b>{undeliverable}</b>",
+        f"Ошибки отправки: <b>{failed}</b>",
+        f"Пропущено: <b>{skipped}</b>",
+    ]
+
+    type_rows = sorted(
+        (
+            (key.removeprefix("type:"), value)
+            for key, value in stats.items()
+            if key.startswith("type:")
+        ),
+        key=lambda item: (-item[1], item[0]),
+    )
+
+    if type_rows:
+        lines.extend(["", "<b>По типам:</b>"])
+        for notification_type, count in type_rows[:12]:
+            lines.append(f"- <code>{notification_type}</code>: {count}")
+
+    return "\n".join(lines)
+
+
+async def send_daily_notification_report(
+    bot: Bot,
+    redis_message_broker: RedisMessageBroker,
+    config: Config,
+) -> None:
+    if not config.admins:
+        logging.warning("daily notification report skipped: no admins configured")
+        return
+
+    stats = await redis_message_broker.pop_notification_report_stats(
+        config.bot_instance_id
+    )
+    report = format_notification_report(stats, config.bot_instance_id)
+
+    for admin_id in config.admins:
+        try:
+            await bot.send_message(chat_id=admin_id, text=report)
+        except Exception:
+            logging.exception(
+                "failed to send daily notification report to admin %s",
+                admin_id,
+            )
+
+
+async def daily_notification_report_loop(
+    bot: Bot,
+    redis_message_broker: RedisMessageBroker,
+    config: Config,
+) -> None:
+    while True:
+        delay = seconds_until_next_daily_report()
+        logging.info(
+            "next daily notification report for bot_instance=%s in %.0f seconds",
+            config.bot_instance_id,
+            delay,
+        )
+        await asyncio.sleep(delay)
+        await send_daily_notification_report(
+            bot=bot,
+            redis_message_broker=redis_message_broker,
+            config=config,
+        )
+
+
 async def listen_notifications(
     bot: Bot,
     redis_message_broker: RedisMessageBroker,
@@ -279,6 +403,11 @@ async def listen_notifications(
                         "Skipping notification '%s' because no Telegram account is linked",
                         message.notification_type,
                     )
+                    await redis_message_broker.increment_notification_report_stat(
+                        config.bot_instance_id,
+                        message.notification_type,
+                        "skipped_no_recipient",
+                    )
                     continue
 
                 if message.notification_type in SUCCESS_NOTIFICATION_TYPES:
@@ -291,6 +420,11 @@ async def listen_notifications(
                 if message.notification_type == "purchase-success-autopay":
                     logging.debug(
                         "skipping notification type 'purchase-success-autopay'"
+                    )
+                    await redis_message_broker.increment_notification_report_stat(
+                        config.bot_instance_id,
+                        message.notification_type,
+                        "skipped_silent",
                     )
                     continue
 
@@ -314,7 +448,14 @@ async def listen_notifications(
                     await asyncio.sleep(random.uniform(0.5, 1.5))
                     continue
 
-                await process_notification(bot, session_maker, message, redis_message_broker)
+                status = await process_notification(
+                    bot, session_maker, message, redis_message_broker
+                )
+                await redis_message_broker.increment_notification_report_stat(
+                    config.bot_instance_id,
+                    message.notification_type,
+                    status,
+                )
 
                 if message.notification_type == "purchase-success-non-autopay":
                     await try_award_sales_referral_purchase_bonus(

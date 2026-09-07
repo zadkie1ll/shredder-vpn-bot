@@ -15,6 +15,7 @@ from utils.config import Config
 from handlers import handlers_router
 from handlers.technical_work import technical_work_router
 from handlers.traffic_monitor import traffic_monitor_router
+from utils.notifications import daily_notification_report_loop
 from utils.notifications import listen_notifications
 from utils.translator import admin_templates_sync_loop
 from utils.redis_message_broker import RedisMessageBroker
@@ -87,6 +88,13 @@ async def main(config: Config) -> None:
                 redis_message_broker=redis_message_broker,
                 session_maker=session_maker,
                 rwms_client=rwms_client,
+                config=config,
+            )
+        )
+        asyncio.create_task(
+            daily_notification_report_loop(
+                bot=bot,
+                redis_message_broker=redis_message_broker,
                 config=config,
             )
         )
