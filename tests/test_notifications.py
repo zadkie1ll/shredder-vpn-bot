@@ -3,9 +3,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from common.models.messages import NotificateUserMessage
-from utils.notifications import format_notification_report
 from utils.notifications import has_telegram_recipient
-from utils.notifications import seconds_until_next_daily_report
+from utils.notification_reports import format_notification_report
+from utils.notification_reports import seconds_until_next_daily_report
 
 
 class NotificationRecipientTest(unittest.TestCase):

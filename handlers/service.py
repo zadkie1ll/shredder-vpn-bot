@@ -27,6 +27,8 @@ from sqlalchemy.orm import aliased
 
 from handlers.broadcast_states import BroadcastStates
 from utils.config import Config
+from utils.notification_reports import format_notification_report
+from utils.redis_message_broker import RedisMessageBroker
 from filters.is_admin import IsAdmin
 
 from common.models.db import User
@@ -55,6 +57,23 @@ from utils.sql_helpers import extend_user_subscription_by_tg_id
 from utils.sql_helpers import get_all_recurrents
 
 service_router = Router()
+
+
+@service_router.message(Command("notifications_report"), IsAdmin())
+async def __on_notifications_report_requested(
+    message: Message,
+    redis_message_broker: RedisMessageBroker,
+    config: Config,
+):
+    stats = await redis_message_broker.get_notification_report_stats(
+        config.bot_instance_id
+    )
+    await message.answer(
+        format_notification_report(
+            stats=stats,
+            bot_instance_id=config.bot_instance_id,
+        )
+    )
 
 BROADCAST_USAGE = (
     "Формат:\n"

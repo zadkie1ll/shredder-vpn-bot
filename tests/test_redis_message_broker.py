@@ -75,3 +75,23 @@ class RedisMessageBrokerTest(IsolatedAsyncioTestCase):
 
         self.assertEqual(stats, {"total": 2, "status:sent": 2})
         redis.delete.assert_awaited_once_with("notification-delivery-report:primary")
+
+    @patch("utils.redis_message_broker.Redis")
+    async def test_get_notification_report_stats_does_not_delete_stats(
+        self, redis_cls
+    ):
+        redis = redis_cls.return_value
+        redis.hgetall = AsyncMock(return_value={"total": "2", "status:sent": "2"})
+        redis.delete = AsyncMock()
+        config = SimpleNamespace(
+            redis_host="localhost",
+            redis_port=6379,
+            redis_password="password",
+            redis_queue_name="notifications",
+        )
+        broker = RedisMessageBroker(config)
+
+        stats = await broker.get_notification_report_stats("primary")
+
+        self.assertEqual(stats, {"total": 2, "status:sent": 2})
+        redis.delete.assert_not_awaited()

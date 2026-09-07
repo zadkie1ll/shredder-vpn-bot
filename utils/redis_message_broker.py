@@ -122,13 +122,28 @@ class RedisMessageBroker:
     ) -> dict[str, int]:
         key = f"notification-delivery-report:{bot_instance_id}"
         try:
-            raw_stats = await self.__redis.hgetall(key)
+            raw_stats = await self.get_notification_report_stats(bot_instance_id)
             if raw_stats:
                 await self.__redis.delete(key)
-            return {field: int(value) for field, value in raw_stats.items()}
+            return raw_stats
         except Exception:
             logging.exception(
                 "failed to pop notification report stats for bot_instance=%s",
+                bot_instance_id,
+            )
+            return {}
+
+    async def get_notification_report_stats(
+        self,
+        bot_instance_id: str,
+    ) -> dict[str, int]:
+        key = f"notification-delivery-report:{bot_instance_id}"
+        try:
+            raw_stats = await self.__redis.hgetall(key)
+            return {field: int(value) for field, value in raw_stats.items()}
+        except Exception:
+            logging.exception(
+                "failed to get notification report stats for bot_instance=%s",
                 bot_instance_id,
             )
             return {}
