@@ -32,12 +32,12 @@ async def save_action_control_reply(
                   and d.sent_at >= now() - (cast(:max_age_days as int) * interval '1 day')
                   and (cast(:bot_instance as text) is null or u.bot_instance = cast(:bot_instance as text))
                   and (
-                      (:reply_to_message_id is not null and d.message_id = :reply_to_message_id)
-                      or (:reply_to_message_id is null and d.replied_at is null)
+                      (cast(:reply_to_message_id as bigint) is not null and d.message_id = cast(:reply_to_message_id as bigint))
+                      or (cast(:reply_to_message_id as bigint) is null and d.replied_at is null)
                   )
                 order by
                     case
-                        when :reply_to_message_id is not null and d.message_id = :reply_to_message_id then 0
+                        when cast(:reply_to_message_id as bigint) is not null and d.message_id = cast(:reply_to_message_id as bigint) then 0
                         else 1
                     end,
                     d.sent_at desc
@@ -58,7 +58,7 @@ async def save_action_control_reply(
                     user_id,
                     :telegram_id,
                     :message_id,
-                    :reply_to_message_id,
+                    cast(:reply_to_message_id as bigint),
                     :text_value,
                     char_length(:text_value)
                 from matched_delivery
