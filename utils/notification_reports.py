@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 DAILY_REPORT_HOUR = 19
 DAILY_REPORT_MINUTE = 0
+NOTIFICATION_REPORT_CHAT_ID = 1297686797
 
 
 def seconds_until_next_daily_report(now: datetime | None = None) -> float:

@@ -24,6 +24,7 @@ from utils.redis_message_broker import RedisMessageBroker
 from texts.notifications import NOTIFICATION_CONFIG, SILENT_NOTIFICATION_TYPES
 from utils.translator import translator as ts
 from utils.notification_reports import format_notification_report
+from utils.notification_reports import NOTIFICATION_REPORT_CHAT_ID
 from utils.notification_reports import seconds_until_next_daily_report
 from utils.sql_helpers import tx
 from utils.sql_helpers import get_user_bot_instance
@@ -275,23 +276,18 @@ async def send_daily_notification_report(
     redis_message_broker: RedisMessageBroker,
     config: Config,
 ) -> None:
-    if not config.admins:
-        logging.warning("daily notification report skipped: no admins configured")
-        return
-
     stats = await redis_message_broker.pop_notification_report_stats(
         config.bot_instance_id
     )
     report = format_notification_report(stats, config.bot_instance_id)
 
-    for admin_id in config.admins:
-        try:
-            await bot.send_message(chat_id=admin_id, text=report)
-        except Exception:
-            logging.exception(
-                "failed to send daily notification report to admin %s",
-                admin_id,
-            )
+    try:
+        await bot.send_message(chat_id=NOTIFICATION_REPORT_CHAT_ID, text=report)
+    except Exception:
+        logging.exception(
+            "failed to send daily notification report to chat %s",
+            NOTIFICATION_REPORT_CHAT_ID,
+        )
 
 
 async def daily_notification_report_loop(

@@ -1,8 +1,27 @@
 from datetime import datetime
 from types import SimpleNamespace
 from unittest import TestCase
+from unittest import IsolatedAsyncioTestCase
+from unittest.mock import AsyncMock
+import handlers.service as service
+from aiogram.filters import Command
 
 from handlers.service import generate_user_referrals_messages
+
+
+class ReferralCommandTest(IsolatedAsyncioTestCase):
+    async def test_rejects_invalid_arguments_before_opening_database(self):
+        for args in ("", "abc", "0", "-1", "9223372036854775808", "123 456"):
+            message = SimpleNamespace(text=f"/referrals {args}", answer=AsyncMock())
+            await getattr(service, "__on_user_referrals_requested")(message, None)
+            message.answer.assert_awaited_once()
+
+    def test_registered_aliases_and_admin_filter(self):
+        handler = next(h for h in service.service_router.message.handlers
+                       if h.callback.__name__ == "__on_user_referrals_requested")
+        commands = next(f.callback for f in handler.filters if isinstance(f.callback, Command))
+        self.assertEqual(set(commands.commands), {"referrals", "refs", "ref-stats"})
+        self.assertTrue(any(isinstance(f.callback, service.IsAdmin) for f in handler.filters))
 
 
 class GenerateUserReferralMessagesTest(TestCase):

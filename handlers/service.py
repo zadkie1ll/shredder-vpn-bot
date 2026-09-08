@@ -28,6 +28,7 @@ from sqlalchemy.orm import aliased
 from handlers.broadcast_states import BroadcastStates
 from utils.config import Config
 from utils.notification_reports import format_notification_report
+from utils.notification_reports import NOTIFICATION_REPORT_CHAT_ID
 from utils.redis_message_broker import RedisMessageBroker
 from filters.is_admin import IsAdmin
 
@@ -68,8 +69,9 @@ async def __on_notifications_report_requested(
     stats = await redis_message_broker.get_notification_report_stats(
         config.bot_instance_id
     )
-    await message.answer(
-        format_notification_report(
+    await message.bot.send_message(
+        chat_id=NOTIFICATION_REPORT_CHAT_ID,
+        text=format_notification_report(
             stats=stats,
             bot_instance_id=config.bot_instance_id,
         )
@@ -1106,7 +1108,7 @@ def generate_referral_report_messages(
 
 
 @service_router.message(
-    F.text.startswith("/refs") | F.text.startswith("/ref-stats"), IsAdmin()
+    Command("referrals", "refs", "ref-stats"), IsAdmin()
 )
 async def __on_user_referrals_requested(
     message: Message,
@@ -1114,17 +1116,19 @@ async def __on_user_referrals_requested(
 ):
     args = message.text.split()[1:] if message.text else []
 
-    if not args:
+    if len(args) != 1:
         await message.answer(
             "❌ Введите Telegram ID пользователя.\n"
-            "Пример: <code>/ref-stats 123456789</code>"
+            "Пример: <code>/referrals 123456789</code>"
         )
         return
 
     try:
         target_tg_id = int(args[0])
+        if target_tg_id <= 0 or target_tg_id > 2**63 - 1:
+            raise ValueError
     except ValueError:
-        await message.answer("❌ Telegram ID должен быть числом.")
+        await message.answer("❌ Telegram ID должен быть положительным целым числом.")
         return
 
     processing_msg = await message.answer("🔄 Собираем реферальную статистику...")
